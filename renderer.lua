@@ -1,5 +1,5 @@
 --[[
-    ZoneLines v1.0.0 - Zone Line Rendering via D3D8
+    ZoneLines v1.1.0 - Zone Line Rendering via D3D8
 
     Zone line bounding boxes have a thin dimension (depth you walk through)
     and a wide dimension (spanning the passage). The dotted line is drawn
@@ -97,6 +97,18 @@ local text_verts = ffi.new('zl_d3d_textured_vertex_t[?]', MAX_TEXT_CHARS * 6);
 local identity_matrix = ffi.new('D3DMATRIX');
 identity_matrix._11 = 1; identity_matrix._22 = 1; identity_matrix._33 = 1; identity_matrix._44 = 1;
 local ortho_matrix = ffi.new('D3DMATRIX');
+local restore_world = ffi.new('D3DMATRIX');
+local restore_view  = ffi.new('D3DMATRIX');
+local restore_proj  = ffi.new('D3DMATRIX');
+
+-- Write a Lua table (from copy_matrix) back into a D3DMATRIX cdata
+local function table_to_matrix(tbl, mat)
+    mat._11 = tbl._11; mat._12 = tbl._12; mat._13 = tbl._13; mat._14 = tbl._14;
+    mat._21 = tbl._21; mat._22 = tbl._22; mat._23 = tbl._23; mat._24 = tbl._24;
+    mat._31 = tbl._31; mat._32 = tbl._32; mat._33 = tbl._33; mat._34 = tbl._34;
+    mat._41 = tbl._41; mat._42 = tbl._42; mat._43 = tbl._43; mat._44 = tbl._44;
+    return mat;
+end
 
 -- Font atlas state (initialized from d3d_present where ImGui is ready)
 local font_atlas_tex_ptr = nil;
@@ -104,8 +116,21 @@ local font_baked         = nil;
 local font_baked_size    = 0;
 
 
--- D3D text colors (ARGB)
+-- D3D text color (ARGB)
 local D3D_TEXT_WHITE  = 0xFFFFFFFF;
+
+-- Copy D3DMATRIX cdata fields into a plain Lua table (cdata refs go stale between frames)
+local function copy_matrix(m)
+    return {
+        _11=m._11, _12=m._12, _13=m._13, _14=m._14,
+        _21=m._21, _22=m._22, _23=m._23, _24=m._24,
+        _31=m._31, _32=m._32, _33=m._33, _34=m._34,
+        _41=m._41, _42=m._42, _43=m._43, _44=m._44,
+    };
+end
+
+-- Expose copy_matrix for zonelines.lua to use when caching
+renderer.copy_matrix = copy_matrix;
 
 -- D3D state
 renderer.d3d_pass          = 0;
@@ -120,6 +145,13 @@ renderer.d3d_text_min_scale = 0.5; -- min font scale (far away)
 renderer.d3d_text_max_scale = 3.0; -- max font scale (close up)
 renderer.d3d_show_labels   = true;
 renderer.d3d_show_distance = true;
+renderer.d3d_dist_position = 'bottom';  -- 'bottom', 'top', 'left', 'right'
+renderer.d3d_label_spacing = 2;         -- extra pixel gap between name and distance
+renderer.dot_glow_enabled   = true;     -- pulsating dots
+renderer.dot_glow_speed     = 2.0;      -- pulse speed (radians/sec)
+renderer.dot_glow_intensity = 0.5;      -- glow brightness multiplier
+renderer.dot_glow_min       = 0.4;      -- pulse minimum (0-1)
+renderer.dot_glow_max       = 1.0;      -- pulse maximum (0-1)
 
 -------------------------------------------------------------------------------
 -- Font Atlas: Initialize from ImGui's baked font atlas for D3D text rendering
@@ -317,6 +349,7 @@ local D3D_DOT_GLOW_SIZE = 0.35;
 local frame_labels = {};
 local frame_labels_n = 0;
 
+
 -- Convert RGB floats (0-1) to D3D ARGB uint32 with given alpha byte (0-255).
 -- Uses arithmetic (not bit ops) to produce positive doubles matching hex literals.
 local function rgb_to_argb(rgb, alpha)
@@ -373,9 +406,11 @@ local function rebuild_colors(s)
     D3D_CIRCLE_FAR   = rgb_to_argb(far,   0x22);
     D3D_CIRCLE_MID   = rgb_to_argb(mid,   0x22);
     D3D_CIRCLE_CLOSE = rgb_to_argb(close, 0x22);
+
 end
 
--- Sync tuning from settings each frame
+-- Sync tuning from settings (called only when settings change, not every frame)
+local settings_applied = false;
 local function apply_settings(s)
     if (s == nil) then return; end
     DOT_SPACING          = s.dot_spacing or 0.3;
@@ -384,6 +419,11 @@ local function apply_settings(s)
     D3D_DOT_GLOW_SIZE    = (s.dot_size or 1.4) * 0.05;
     ZONELINE_OVERRIDES   = s.zoneline_overrides or {};
     rebuild_colors(s);
+    settings_applied = true;
+end
+
+function renderer.mark_settings_dirty()
+    settings_applied = false;
 end
 
 -------------------------------------------------------------------------------
@@ -832,10 +872,11 @@ end
 -- D3D Border Style: Dots (style 0) — billboard diamonds per position
 -------------------------------------------------------------------------------
 
-local function draw_d3d_style_dots(device, cdata, rx, ry, rz, ux, uy, uz, core_col, glow_col)
+local function draw_d3d_style_dots(device, cdata, rx, ry, rz, ux, uy, uz, core_col, glow_col, dot_size)
+    local sz = dot_size or D3D_DOT_GLOW_SIZE;
     for _, p in ipairs(cdata.positions) do
         draw_d3d_dot_gradient(device, rx, ry, rz, ux, uy, uz,
-            p.wx, p.wy, p.wz, D3D_DOT_GLOW_SIZE, core_col, glow_col);
+            p.wx, p.wy, p.wz, sz, core_col, glow_col);
     end
 end
 
@@ -865,22 +906,210 @@ local function get_d3d_circle_color(dist)
     return D3D_CIRCLE_FAR;
 end
 
+-------------------------------------------------------------------------------
+-- Extracted pass functions (own upvalue budgets — avoids LuaJIT 60-upvalue
+-- limit on the main draw_d3d pcall closure)
+-------------------------------------------------------------------------------
+
+local function draw_text_pass(device, view, text_scale)
+    local vp_w = renderer.cached_vp_w;
+    local vp_h = renderer.cached_vp_h;
+    local cached_proj = renderer.cached_proj;
+
+    if (frame_labels_n <= 0 or font_baked == nil or font_atlas_tex_ptr == nil
+        or vp_w <= 0 or vp_h <= 0 or cached_proj == nil) then
+        return;
+    end
+
+    -- Use the view matrix already obtained at the top of draw_d3d (same frame)
+    if (view == nil) then return; end
+
+    -- Switch to textured vertex format
+    device:SetTexture(0, font_atlas_tex_ptr);
+    device:SetVertexShader(D3DFVF_XYZ_DIFFUSE_TEX1);
+
+    -- Texture stage: color from vertex (flat text), alpha from texture (glyph shape)
+    device:SetTextureStageState(0, D3DTSS_COLOROP, 2);    -- SELECTARG1
+    device:SetTextureStageState(0, D3DTSS_COLORARG1, 0);  -- DIFFUSE
+    device:SetTextureStageState(0, D3DTSS_ALPHAOP, 2);    -- SELECTARG1
+    device:SetTextureStageState(0, D3DTSS_ALPHAARG1, 2);  -- TEXTURE
+
+    -- LINEAR filtering
+    device:SetTextureStageState(0, D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
+    device:SetTextureStageState(0, D3DTSS_MINFILTER, D3DTEXF_LINEAR);
+    device:SetTextureStageState(0, D3DTSS_ADDRESSU, D3DTADDRESS_CLAMP);
+    device:SetTextureStageState(0, D3DTSS_ADDRESSV, D3DTADDRESS_CLAMP);
+
+    -- Terminate stage 1
+    device:SetTexture(1, nil);
+    device:SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+    device:SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+
+    -- Alpha test: discard transparent glyph background pixels
+    device:SetRenderState(D3DRS_ALPHATESTENABLE, 1);
+    device:SetRenderState(D3DRS_ALPHAREF, 0x40);
+    device:SetRenderState(D3DRS_ALPHAFUNC, D3DCMP_GREATEREQUAL);
+
+    -- Set up ortho projection: screen pixels map 1:1, Z passes through for depth
+    device:SetTransform(D3DTS_WORLD, identity_matrix);
+    device:SetTransform(2, identity_matrix);  -- view = identity
+
+    -- Rebuild ortho each frame (viewport size may change)
+    ffi.fill(ortho_matrix, ffi.sizeof('D3DMATRIX'), 0);
+    ortho_matrix._11 =  2.0 / vp_w;    -- X: [0,w] -> [-1,1]
+    ortho_matrix._22 = -2.0 / vp_h;    -- Y: [0,h] -> [1,-1] (flip Y)
+    ortho_matrix._33 =  1.0;            -- Z: pass through
+    ortho_matrix._44 =  1.0;
+    ortho_matrix._41 = -1.0;            -- X offset: pixel 0 -> clip -1
+    ortho_matrix._42 =  1.0;            -- Y offset: pixel 0 -> clip +1
+    device:SetTransform(3, ortho_matrix);  -- projection = ortho
+
+    local ref_dist = 30.0;  -- distance where text is at base scale
+    local min_s = renderer.d3d_text_min_scale;
+    local max_s = renderer.d3d_text_max_scale;
+    local base_s = text_scale;
+
+    for li = 1, frame_labels_n do
+        local lbl = frame_labels[li];
+        if (lbl.x ~= nil and lbl.y ~= nil and lbl.z ~= nil
+            and lbl.dist ~= nil) then
+            local r1, r2, r3, r4 = project_with_z(
+                view, cached_proj, vp_w, vp_h,
+                lbl.x, lbl.y, lbl.z);
+            local sx = tonumber(r1);
+            local sy = tonumber(r2);
+            local ndcz = tonumber(r4);
+            if (r3 == true and sx ~= nil and sy ~= nil and ndcz ~= nil) then
+                local dist_factor = ref_dist / math.max(lbl.dist, 1.0);
+                dist_factor = math.max(min_s, math.min(max_s, dist_factor));
+                local fs = base_s * dist_factor;
+                local line_height = fs * 14;
+                local dpos = renderer.d3d_dist_position or 'bottom';
+                local spacing = renderer.d3d_label_spacing or 2;
+
+                -- Add separator for left/right positioning
+                local draw_dist_text = lbl.dist_text;
+                if (lbl.dist_text ~= nil) then
+                    if (dpos == 'right') then
+                        draw_dist_text = '- ' .. lbl.dist_text;
+                    elseif (dpos == 'left') then
+                        draw_dist_text = lbl.dist_text .. ' -';
+                    end
+                end
+
+                local name_tw = (lbl.name ~= nil) and measure_text_screen(lbl.name, fs) or 0;
+                local dist_tw = (draw_dist_text ~= nil) and measure_text_screen(draw_dist_text, fs) or 0;
+
+                -- Bottom-anchored text: grows UPWARD from sy so it doesn't
+                -- collide with dots below when scaling up at close range.
+                -- sy = projected label anchor (just above the dots).
+                -- All text lines are placed above sy.
+
+                local has_both = (lbl.name ~= nil and draw_dist_text ~= nil);
+
+                local ny, nx;  -- name position
+                local dx, dy;  -- distance position
+
+                if (dpos == 'bottom') then
+                    if (has_both) then
+                        dy = sy - line_height;
+                        ny = sy - 2 * line_height - spacing;
+                    elseif (draw_dist_text ~= nil) then
+                        dy = sy - line_height;
+                    else
+                        ny = sy - line_height;
+                    end
+                elseif (dpos == 'top') then
+                    if (has_both) then
+                        ny = sy - line_height;
+                        dy = sy - 2 * line_height - spacing;
+                    elseif (draw_dist_text ~= nil) then
+                        dy = sy - line_height;
+                    else
+                        ny = sy - line_height;
+                    end
+                elseif (dpos == 'left' or dpos == 'right') then
+                    ny = sy - line_height;
+                    dy = sy - line_height;
+                end
+
+                -- Draw name
+                if (lbl.name ~= nil and ny ~= nil) then
+                    nx = sx - name_tw / 2;
+                    local mv = build_text_screen(lbl.name, D3D_TEXT_WHITE,
+                        nx, ny, ndcz, fs);
+                    if (mv > 0) then
+                        device:DrawPrimitiveUP(D3DPT_TRIANGLELIST, mv / 3, text_verts, TEXTURED_VERTEX_SIZE);
+                    end
+                end
+
+                -- Draw distance
+                if (draw_dist_text ~= nil and dy ~= nil) then
+                    if (dpos == 'bottom' or dpos == 'top') then
+                        dx = sx - dist_tw / 2;
+                    elseif (dpos == 'right') then
+                        dx = sx + name_tw / 2 + spacing;
+                    elseif (dpos == 'left') then
+                        dx = sx - name_tw / 2 - dist_tw - spacing;
+                    else
+                        dx = sx - dist_tw / 2;
+                    end
+                    local mv = build_text_screen(draw_dist_text, D3D_TEXT_WHITE,
+                        dx, dy, ndcz, fs);
+                    if (mv > 0) then
+                        device:DrawPrimitiveUP(D3DPT_TRIANGLELIST, mv / 3, text_verts, TEXTURED_VERTEX_SIZE);
+                    end
+                end
+            end
+        end
+    end
+end
+
 function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
     if (zone_lines == nil or #zone_lines == 0) then return; end
-
-    local view = renderer.cached_view;
-    if (view == nil) then return; end
 
     local device = d3d8.get_device();
     if (device == nil) then return; end
 
-    apply_settings(s);
+    -- Try fresh view matrix from device (prevents camera lag), fall back to cached copy
+    local view = renderer.cached_view;
+    local fresh_ok, fresh_v = pcall(function()
+        local _, v = device:GetTransform(2);  -- D3DTS_VIEW
+        if (v ~= nil) then
+            local tbl = copy_matrix(v);
+            if (type(tbl._11) == 'number') then return tbl; end
+        end
+        return nil;
+    end);
+    if (fresh_ok and fresh_v ~= nil) then
+        view = fresh_v;
+    end
+    if (view == nil) then return; end
+
+    if (not settings_applied) then
+        apply_settings(s);
+    end
+
+    -- Quick pre-check: skip entire render state manipulation if no zone line
+    -- is within render distance.  Setting/restoring D3D state on every frame
+    -- even when nothing is drawn can cause sky blinking in open areas.
+    local render_dist = s.render_distance or 100.0;
+    local any_visible = false;
+    for _, zl in ipairs(zone_lines) do
+        local dx = player_x - zl.x;
+        local dz = player_z - zl.z;
+        if (dx * dx + dz * dz <= render_dist * render_dist) then
+            any_visible = true;
+            break;
+        end
+    end
+    if (not any_visible) then return; end
 
     -- Extract camera right/up vectors from view matrix for billboard orientation
-    local ok, rx, ry, rz, ux, uy, uz = pcall(function()
-        return view._11, view._21, view._31, view._12, view._22, view._32;
-    end);
-    if (not ok or type(rx) ~= 'number' or type(uy) ~= 'number') then return; end
+    -- (view is a plain Lua table — field access is safe, no pcall needed)
+    local rx, ry, rz = view._11, view._21, view._31;
+    local ux, uy, uz = view._12, view._22, view._32;
+    if (type(rx) ~= 'number' or type(uy) ~= 'number') then return; end
 
     -- Normalize
     local rlen = math.sqrt(rx * rx + ry * ry + rz * rz);
@@ -902,9 +1131,14 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
     local _, save_fvf      = device:GetVertexShader();
     local _, save_tex      = device:GetTexture(0);
     local _, save_ps       = device:GetPixelShader();
-    local _, save_world    = device:GetTransform(D3DTS_WORLD);
-    local _, save_view_t   = device:GetTransform(2);  -- D3DTS_VIEW
-    local _, save_proj_t   = device:GetTransform(3);  -- D3DTS_PROJECTION
+    -- Save transforms as Lua tables — raw cdata from GetTransform() points to
+    -- internal D3D buffers that go stale when we SetTransform() our own matrices.
+    local _, raw_world = device:GetTransform(D3DTS_WORLD);
+    local save_world = (raw_world ~= nil) and copy_matrix(raw_world) or nil;
+    local _, raw_view = device:GetTransform(2);  -- D3DTS_VIEW
+    local save_view = (raw_view ~= nil) and copy_matrix(raw_view) or nil;
+    local _, raw_proj = device:GetTransform(3);  -- D3DTS_PROJECTION
+    local save_proj = (raw_proj ~= nil) and copy_matrix(raw_proj) or nil;
     local _, save_colorop   = device:GetTextureStageState(0, D3DTSS_COLOROP);
     local _, save_colorarg1 = device:GetTextureStageState(0, D3DTSS_COLORARG1);
     local _, save_colorarg2 = device:GetTextureStageState(0, D3DTSS_COLORARG2);
@@ -952,6 +1186,19 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
         -- Collect label data during marker loop (drawn in text pass)
         frame_labels_n = 0;
 
+        -- ── Glow pulse (modulates existing dots — no separate pass needed) ──
+        local glow_pulse = 1.0;
+        local glow_size_mult = 1.0;
+        if (renderer.dot_glow_enabled) then
+            local t = math.sin(os.clock() * renderer.dot_glow_speed);  -- -1 to 1
+            local gmin = renderer.dot_glow_min or 0.4;
+            local gmax = renderer.dot_glow_max or 1.0;
+            local mid = (gmin + gmax) / 2;
+            local half = (gmax - gmin) / 2;
+            glow_pulse = mid + half * t;                     -- alpha oscillation
+            glow_size_mult = 1.0 - (1.0 - glow_pulse) * 0.3; -- subtle size breathing
+        end
+
         -- ── Pass 1: Untextured colored markers (dots + circles) ──
 
         for _, zl in ipairs(zone_lines) do
@@ -970,6 +1217,18 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
                 if (is_curtain_zoneline(zl)) then
                     -- Curtain zone line: compute dot positions along the wider edge
                     local core_col, glow_col = get_d3d_dot_colors(display_dist);
+
+                    -- Apply glow pulse to edge alpha and dot size
+                    if (renderer.dot_glow_enabled) then
+                        local gr = math.floor(glow_col / 0x10000) % 0x100;
+                        local gg = math.floor(glow_col / 0x100) % 0x100;
+                        local gb = glow_col % 0x100;
+                        local ga = math.floor(glow_col / 0x1000000) % 0x100;
+                        ga = math.floor(ga * glow_pulse * renderer.dot_glow_intensity * 2 + 0.5);
+                        if (ga > 255) then ga = 255; end
+                        glow_col = ga * 0x1000000 + gr * 0x10000 + gg * 0x100 + gb;
+                    end
+
                     local zl_trim = ovr.trim or 0;
                     local cdata = compute_curtain_positions(zl.x, zl.y, zl.z,
                         zl.sx / 2, zl.sy / 2, zl.sz / 2,
@@ -977,7 +1236,8 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
                     label_y = cdata.hover_y;
                     label_x = cdata.label_x;
                     label_z = cdata.label_z;
-                    draw_d3d_style_dots(device, cdata, rx, ry, rz, ux, uy, uz, core_col, glow_col);
+                    local dot_sz = D3D_DOT_GLOW_SIZE * glow_size_mult;
+                    draw_d3d_style_dots(device, cdata, rx, ry, rz, ux, uy, uz, core_col, glow_col, dot_sz);
                 else
                     -- Non-curtain: circle marker (portals)
                     local fill_col = get_d3d_circle_color(display_dist);
@@ -998,130 +1258,36 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
                     label_y = zl.y - pole_h;  -- move label to top of pole
                 end
 
-                -- Collect labels for text pass (name on top, distance below)
+                -- Collect labels for text pass (name + distance stacked in screen space)
                 if (want_labels or want_dist) then
                     local text_y = label_y - renderer.d3d_label_offset;
+                    local name = nil;
+                    local dist_text = nil;
                     if (want_labels) then
-                        local name = zl.display_name;
+                        name = zl.display_name;
                         if (name == nil or name == '') then name = 'Zone Line'; end
-                        frame_labels_n = frame_labels_n + 1;
-                        local lbl = frame_labels[frame_labels_n];
-                        if (lbl == nil) then lbl = {}; frame_labels[frame_labels_n] = lbl; end
-                        lbl.x = label_x; lbl.y = text_y; lbl.z = label_z;
-                        lbl.text = name; lbl.dist = display_dist;
                     end
                     if (want_dist) then
-                        local dist_y = text_y + (want_labels and 0.4 or 0);
-                        frame_labels_n = frame_labels_n + 1;
-                        local lbl = frame_labels[frame_labels_n];
-                        if (lbl == nil) then lbl = {}; frame_labels[frame_labels_n] = lbl; end
-                        lbl.x = label_x; lbl.y = dist_y; lbl.z = label_z;
-                        lbl.text = string.format('%.0fy', display_dist); lbl.dist = display_dist;
+                        dist_text = string.format('%.0fy', display_dist);
                     end
+                    frame_labels_n = frame_labels_n + 1;
+                    local lbl = frame_labels[frame_labels_n];
+                    if (lbl == nil) then lbl = {}; frame_labels[frame_labels_n] = lbl; end
+                    lbl.x = label_x; lbl.y = text_y; lbl.z = label_z;
+                    lbl.name = name; lbl.dist_text = dist_text; lbl.dist = display_dist;
                 end
             end
         end
 
-        -- ── Pass 2: Screen-space text labels (ortho projection, pixel-perfect) ──
-
-        local vp_w = renderer.cached_vp_w;
-        local vp_h = renderer.cached_vp_h;
-        local cached_proj = renderer.cached_proj;
-
-        if (frame_labels_n > 0 and font_baked ~= nil and font_atlas_tex_ptr ~= nil
-            and vp_w > 0 and vp_h > 0 and cached_proj ~= nil) then
-
-            -- Use device's current view (this frame's camera) + cached proj from d3d_present
-            -- (stable main-pass FOV — device proj at beginscene may be from shadow/UI pass)
-            local _, cur_view = device:GetTransform(2);
-            if (cur_view ~= nil) then
-
-                -- Switch to textured vertex format
-                device:SetTexture(0, font_atlas_tex_ptr);
-                device:SetVertexShader(D3DFVF_XYZ_DIFFUSE_TEX1);
-
-                -- Texture stage: color from vertex (flat text), alpha from texture (glyph shape)
-                device:SetTextureStageState(0, D3DTSS_COLOROP, 2);    -- SELECTARG1
-                device:SetTextureStageState(0, D3DTSS_COLORARG1, 0);  -- DIFFUSE
-                device:SetTextureStageState(0, D3DTSS_ALPHAOP, 2);    -- SELECTARG1
-                device:SetTextureStageState(0, D3DTSS_ALPHAARG1, 2);  -- TEXTURE
-
-                -- LINEAR filtering
-                device:SetTextureStageState(0, D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
-                device:SetTextureStageState(0, D3DTSS_MINFILTER, D3DTEXF_LINEAR);
-                device:SetTextureStageState(0, D3DTSS_ADDRESSU, D3DTADDRESS_CLAMP);
-                device:SetTextureStageState(0, D3DTSS_ADDRESSV, D3DTADDRESS_CLAMP);
-
-                -- Terminate stage 1
-                device:SetTexture(1, nil);
-                device:SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
-                device:SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-
-                -- Alpha test: discard transparent glyph background pixels
-                device:SetRenderState(D3DRS_ALPHATESTENABLE, 1);
-                device:SetRenderState(D3DRS_ALPHAREF, 0x40);
-                device:SetRenderState(D3DRS_ALPHAFUNC, D3DCMP_GREATEREQUAL);
-
-                -- Set up ortho projection: screen pixels map 1:1, Z passes through for depth
-                device:SetTransform(D3DTS_WORLD, identity_matrix);
-                device:SetTransform(2, identity_matrix);  -- view = identity
-
-                -- Rebuild ortho each frame (viewport size may change)
-                ffi.fill(ortho_matrix, ffi.sizeof('D3DMATRIX'), 0);
-                ortho_matrix._11 =  2.0 / vp_w;    -- X: [0,w] → [-1,1]
-                ortho_matrix._22 = -2.0 / vp_h;    -- Y: [0,h] → [1,-1] (flip Y)
-                ortho_matrix._33 =  1.0;            -- Z: pass through
-                ortho_matrix._44 =  1.0;
-                ortho_matrix._41 = -1.0;            -- X offset: pixel 0 → clip -1
-                ortho_matrix._42 =  1.0;            -- Y offset: pixel 0 → clip +1
-                device:SetTransform(3, ortho_matrix);  -- projection = ortho
-
-                local ref_dist = 30.0;  -- distance where text is at base scale
-                local min_s = renderer.d3d_text_min_scale;
-                local max_s = renderer.d3d_text_max_scale;
-                local base_s = text_scale;
-
-                for li = 1, frame_labels_n do
-                    local lbl = frame_labels[li];
-                    if (lbl.x ~= nil and lbl.y ~= nil and lbl.z ~= nil
-                        and lbl.dist ~= nil and lbl.text ~= nil) then
-                        local lok, _ = pcall(function()
-                            if (cur_view == nil or cached_proj == nil) then return; end
-                            local r1, r2, r3, r4 = project_with_z(
-                                cur_view, cached_proj, vp_w, vp_h,
-                                lbl.x, lbl.y, lbl.z);
-                            local sx = tonumber(r1);
-                            local sy = tonumber(r2);
-                            local ndcz = tonumber(r4);
-                            if (r3 ~= true or sx == nil or sy == nil or ndcz == nil) then return; end
-
-                            local dist_factor = ref_dist / math.max(lbl.dist, 1.0);
-                            dist_factor = math.max(min_s, math.min(max_s, dist_factor));
-                            local fs = base_s * dist_factor;
-
-                            local tw = measure_text_screen(lbl.text, fs);
-                            local cx = -tw / 2;
-
-                            -- Main text (no shadow)
-                            local mv = build_text_screen(lbl.text, D3D_TEXT_WHITE,
-                                sx, sy, ndcz, fs);
-                            if (mv > 0) then
-                                for j = 0, mv - 1 do
-                                    text_verts[j].x = text_verts[j].x + cx;
-                                end
-                                device:DrawPrimitiveUP(D3DPT_TRIANGLELIST, mv / 3, text_verts, TEXTURED_VERTEX_SIZE);
-                            end
-                        end);
-                    end
-                end
-            end
-        end
+        -- ── Pass 2: Text labels ──
+        -- (Extracted to standalone function to stay within LuaJIT 60-upvalue limit)
+        draw_text_pass(device, view, text_scale);
     end);
 
     -- ══ ALWAYS restore render states (even if drawing errored out) ══
-    if (save_world ~= nil) then device:SetTransform(D3DTS_WORLD, save_world); end
-    if (save_view_t ~= nil) then device:SetTransform(2, save_view_t); end
-    if (save_proj_t ~= nil) then device:SetTransform(3, save_proj_t); end
+    if (save_world ~= nil) then device:SetTransform(D3DTS_WORLD, table_to_matrix(save_world, restore_world)); end
+    if (save_view ~= nil) then device:SetTransform(2, table_to_matrix(save_view, restore_view)); end
+    if (save_proj ~= nil) then device:SetTransform(3, table_to_matrix(save_proj, restore_proj)); end
     device:SetTexture(0, save_tex);
     device:SetRenderState(D3DRS_LIGHTING, save_light);
     device:SetRenderState(D3DRS_ZENABLE, save_zenable);

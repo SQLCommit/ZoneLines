@@ -1,5 +1,5 @@
 --[[
-    ZoneLines v1.0.0 - Zone Line Visualizer for Ashita v4
+    ZoneLines v1.1.0 - Zone Line Visualizer for Ashita v4
 
     Draws ground markers at zone line positions to help players see
     invisible zone transition boundaries. Zone lines are pre-extracted
@@ -13,12 +13,12 @@
         /zl help         - Show command help
 
     Author: SQLCommit
-    Version: 1.0.0
+    Version: 1.1.0
 ]]--
 
 addon.name    = 'zonelines';
 addon.author  = 'SQLCommit';
-addon.version = '1.0.0';
+addon.version = '1.1.0';
 addon.desc    = 'Visualizes zone line boundaries with ground markers.';
 addon.link    = 'https://github.com/SQLCommit/zonelines';
 
@@ -40,20 +40,27 @@ local default_settings = T{
     render_distance  = 300.0,
     dot_size         = 1.4,
     dot_spacing      = 0.3,
-    dot_glow         = 0.15,
+    dot_glow         = 0.8,
     hover_height     = 0.5,
     rise_distance    = 0.9,
-    dot_color        = T{ 0.0, 1.0, 0.0 },   -- main dot color
+    dot_color        = T{ 0.0, 1.0, 0.94 },  -- main dot color
     use_dist_colors  = false,                  -- use distance-based colors
     color_far        = T{ 0.0, 1.0, 0.0 },   -- green  (>= 20y)
     color_mid        = T{ 1.0, 1.0, 0.0 },   -- yellow (< 20y)
     color_close      = T{ 1.0, 0.0, 0.0 },   -- red    (< 10y)
     d3d_text_scale       = 0.9,
-    d3d_label_offset     = 1.1,
-    d3d_text_min_scale   = 0.1,
-    d3d_text_max_scale   = 2.0,
+    d3d_label_offset     = 0.5,
+    d3d_text_min_scale   = 0.7,
+    d3d_text_max_scale   = 2.3,
     d3d_show_labels      = true,
     d3d_show_distance    = true,
+    d3d_dist_position    = 'bottom',  -- 'bottom', 'top', 'left', 'right'
+    d3d_label_spacing    = 8,         -- extra pixel gap between name and distance
+    dot_glow_enabled     = true,      -- pulsating dots
+    dot_glow_speed       = 2.0,       -- pulse speed (radians/sec)
+    dot_glow_intensity   = 0.5,       -- glow brightness multiplier
+    dot_glow_min         = 0.4,       -- pulse minimum (0-1)
+    dot_glow_max         = 1.0,       -- pulse maximum (0-1)
     zoneline_overrides   = T{
         ['846018170']  = T{ trim = 1.5 },
         ['846083706']  = T{ trim = 1.3 },
@@ -142,6 +149,25 @@ local function print_help()
 end
 
 -------------------------------------------------------------------------------
+-- Sync settings to renderer fields
+-------------------------------------------------------------------------------
+local function sync_renderer(settings_ref)
+    renderer.d3d_text_scale     = settings_ref.d3d_text_scale or 1.0;
+    renderer.d3d_label_offset   = settings_ref.d3d_label_offset or 0.6;
+    renderer.d3d_text_min_scale = settings_ref.d3d_text_min_scale or 0.5;
+    renderer.d3d_text_max_scale = settings_ref.d3d_text_max_scale or 3.0;
+    renderer.d3d_show_labels    = (settings_ref.d3d_show_labels ~= false);
+    renderer.d3d_show_distance  = (settings_ref.d3d_show_distance ~= false);
+    renderer.d3d_dist_position  = settings_ref.d3d_dist_position or 'bottom';
+    renderer.d3d_label_spacing  = settings_ref.d3d_label_spacing or 2;
+    renderer.dot_glow_enabled   = (settings_ref.dot_glow_enabled ~= false);
+    renderer.dot_glow_speed     = settings_ref.dot_glow_speed or 2.0;
+    renderer.dot_glow_intensity = settings_ref.dot_glow_intensity or 0.5;
+    renderer.dot_glow_min       = settings_ref.dot_glow_min or 0.4;
+    renderer.dot_glow_max       = settings_ref.dot_glow_max or 1.0;
+end
+
+-------------------------------------------------------------------------------
 -- Event: Load
 -------------------------------------------------------------------------------
 ashita.events.register('load', 'zonelines_load', function()
@@ -149,12 +175,7 @@ ashita.events.register('load', 'zonelines_load', function()
 
     -- D3D depth-tested rendering is always on
     renderer.hide_behind_walls = true;
-    renderer.d3d_text_scale     = s.d3d_text_scale or 1.0;
-    renderer.d3d_label_offset   = s.d3d_label_offset or 0.6;
-    renderer.d3d_text_min_scale = s.d3d_text_min_scale or 0.5;
-    renderer.d3d_text_max_scale = s.d3d_text_max_scale or 3.0;
-    renderer.d3d_show_labels    = (s.d3d_show_labels ~= false);
-    renderer.d3d_show_distance  = (s.d3d_show_distance ~= false);
+    sync_renderer(s);
 
     -- Initialize data layer (loads zone line data from DAT files)
     local config_path = AshitaCore:GetInstallPath() .. '\\config\\addons\\zonelines';
@@ -306,9 +327,15 @@ ashita.events.register('d3d_present', 'zonelines_present', function()
         local dev = d3d8.get_device();
         if (dev ~= nil) then
             local _, v = dev:GetTransform(2);  -- D3DTS_VIEW
-            if (v ~= nil) then renderer.cached_view = v; end
+            if (v ~= nil) then
+                local ok, tbl = pcall(renderer.copy_matrix, v);
+                if (ok and type(tbl._11) == 'number') then renderer.cached_view = tbl; end
+            end
             local _, p = dev:GetTransform(3);  -- D3DTS_PROJECTION
-            if (p ~= nil) then renderer.cached_proj = p; end
+            if (p ~= nil) then
+                local ok, tbl = pcall(renderer.copy_matrix, p);
+                if (ok and type(tbl._11) == 'number') then renderer.cached_proj = tbl; end
+            end
             local _, vp = dev:GetViewport();
             if (vp ~= nil) then
                 renderer.cached_vp_w = vp.Width;
@@ -337,6 +364,7 @@ ashita.events.register('d3d_present', 'zonelines_present', function()
     if (ui.settings_dirty) then
         ui.settings_dirty = false;
         ui.sync_settings();
+        renderer.mark_settings_dirty();
         settings.save();
     end
 
@@ -357,12 +385,8 @@ end);
 settings.register('settings', 'zonelines_settings_update', function(new_s)
     if (new_s ~= nil) then
         s = new_s;
-        renderer.d3d_text_scale     = s.d3d_text_scale or 1.0;
-        renderer.d3d_label_offset   = s.d3d_label_offset or 0.6;
-        renderer.d3d_text_min_scale = s.d3d_text_min_scale or 0.5;
-        renderer.d3d_text_max_scale = s.d3d_text_max_scale or 3.0;
-        renderer.d3d_show_labels    = (s.d3d_show_labels ~= false);
-        renderer.d3d_show_distance  = (s.d3d_show_distance ~= false);
+        sync_renderer(s);
+        renderer.mark_settings_dirty();
         ui.apply_settings(s);
     end
 end);

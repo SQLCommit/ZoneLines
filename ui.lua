@@ -1,5 +1,5 @@
 --[[
-    ZoneLines v1.0.0 - ImGui Settings & Status Window
+    ZoneLines v1.1.0 - ImGui Settings & Status Window
     Displays zone line bounding boxes for the current zone with
     rendering settings and zone line information.
 ]]--
@@ -35,6 +35,15 @@ local buf_d3d_text_min_scale = { 0.5 };
 local buf_d3d_text_max_scale = { 3.0 };
 local buf_d3d_show_labels    = { true };
 local buf_d3d_show_distance  = { true };
+local buf_d3d_dist_pos_idx  = { 0 };
+local DIST_POS_NAMES = 'Bottom\0Top\0Left\0Right\0';
+local DIST_POS_VALUES = { 'bottom', 'top', 'left', 'right' };
+local buf_d3d_label_spacing  = { 2 };
+local buf_dot_glow_enabled   = { true };
+local buf_dot_glow_speed     = { 2.0 };
+local buf_dot_glow_intensity = { 0.5 };
+local buf_dot_glow_min       = { 0.4 };
+local buf_dot_glow_max       = { 1.0 };
 local buf_dot_color          = { 0.0, 1.0, 0.0 };
 local buf_use_dist_colors    = { false };
 local buf_color_far          = { 0.0, 1.0, 0.0 };
@@ -64,6 +73,16 @@ local function sync_from_settings()
     buf_d3d_text_max_scale[1]   = settings_ref.d3d_text_max_scale or 3.0;
     buf_d3d_show_labels[1]      = (settings_ref.d3d_show_labels ~= false);
     buf_d3d_show_distance[1]    = (settings_ref.d3d_show_distance ~= false);
+    local dp = settings_ref.d3d_dist_position or 'bottom';
+    for i = 1, #DIST_POS_VALUES do
+        if (DIST_POS_VALUES[i] == dp) then buf_d3d_dist_pos_idx[1] = i - 1; break; end
+    end
+    buf_d3d_label_spacing[1]  = settings_ref.d3d_label_spacing or 2;
+    buf_dot_glow_enabled[1]   = (settings_ref.dot_glow_enabled ~= false);
+    buf_dot_glow_speed[1]     = settings_ref.dot_glow_speed or 2.0;
+    buf_dot_glow_intensity[1] = settings_ref.dot_glow_intensity or 0.5;
+    buf_dot_glow_min[1]       = settings_ref.dot_glow_min or 0.4;
+    buf_dot_glow_max[1]       = settings_ref.dot_glow_max or 1.0;
     local dc = settings_ref.dot_color or { 0, 1, 0 };
     buf_dot_color[1] = dc[1] or 0; buf_dot_color[2] = dc[2] or 1; buf_dot_color[3] = dc[3] or 0;
     buf_use_dist_colors[1] = (settings_ref.use_dist_colors == true);
@@ -105,6 +124,13 @@ local function sync_to_settings()
     settings_ref.d3d_text_max_scale   = buf_d3d_text_max_scale[1];
     settings_ref.d3d_show_labels      = buf_d3d_show_labels[1];
     settings_ref.d3d_show_distance    = buf_d3d_show_distance[1];
+    settings_ref.d3d_dist_position    = DIST_POS_VALUES[buf_d3d_dist_pos_idx[1] + 1] or 'bottom';
+    settings_ref.d3d_label_spacing    = buf_d3d_label_spacing[1];
+    settings_ref.dot_glow_enabled     = buf_dot_glow_enabled[1];
+    settings_ref.dot_glow_speed       = buf_dot_glow_speed[1];
+    settings_ref.dot_glow_intensity   = buf_dot_glow_intensity[1];
+    settings_ref.dot_glow_min         = buf_dot_glow_min[1];
+    settings_ref.dot_glow_max         = buf_dot_glow_max[1];
     settings_ref.dot_color   = T{ buf_dot_color[1],   buf_dot_color[2],   buf_dot_color[3] };
     settings_ref.use_dist_colors = buf_use_dist_colors[1];
     settings_ref.color_far   = T{ buf_color_far[1],   buf_color_far[2],   buf_color_far[3] };
@@ -206,14 +232,34 @@ function ui.render(zone_id, zone_name)
                 imgui.SetTooltip('Show zone destination names above markers.');
             end
 
-            imgui.SameLine();
             c = imgui.Checkbox('Distance', buf_d3d_show_distance);
             if (c) then
                 changed = true;
                 renderer.d3d_show_distance = buf_d3d_show_distance[1];
             end
             if (imgui.IsItemHovered()) then
-                imgui.SetTooltip('Show distance to zone line below the label.');
+                imgui.SetTooltip('Show distance to zone line.');
+            end
+            if (buf_d3d_show_distance[1]) then
+                imgui.SameLine();
+                imgui.PushItemWidth(100);
+                if (imgui.Combo('Position##distpos', buf_d3d_dist_pos_idx, DIST_POS_NAMES)) then
+                    changed = true;
+                    renderer.d3d_dist_position = DIST_POS_VALUES[buf_d3d_dist_pos_idx[1] + 1] or 'bottom';
+                end
+                imgui.PopItemWidth();
+                if (imgui.IsItemHovered()) then
+                    imgui.SetTooltip('Position of distance relative to zone name.');
+                end
+            end
+
+            c = imgui.SliderFloat('Label Gap', buf_d3d_label_spacing, 0, 20, '%.0f');
+            if (c) then
+                changed = true;
+                renderer.d3d_label_spacing = buf_d3d_label_spacing[1];
+            end
+            if (imgui.IsItemHovered()) then
+                imgui.SetTooltip('Extra pixel gap between zone name and distance text.');
             end
 
             c = imgui.SliderFloat('Font Size', buf_d3d_text_scale, 0.3, 3.0, '%.1f');
@@ -262,6 +308,56 @@ function ui.render(zone_id, zone_name)
             imgui.Separator();
             imgui.TextColored({ 0.7, 0.7, 0.7, 1.0 }, 'Dots');
             imgui.Spacing();
+
+            c = imgui.Checkbox('Glow Pulse', buf_dot_glow_enabled);
+            if (c) then
+                changed = true;
+                renderer.dot_glow_enabled = buf_dot_glow_enabled[1];
+            end
+            if (imgui.IsItemHovered()) then
+                imgui.SetTooltip('Enable glowing pulsating halos around dots.');
+            end
+
+            if (buf_dot_glow_enabled[1]) then
+                imgui.SameLine();
+                imgui.PushItemWidth(100);
+                c = imgui.SliderFloat('Speed##glow', buf_dot_glow_speed, 0.5, 20.0, '%.1f');
+                if (c) then
+                    changed = true;
+                    renderer.dot_glow_speed = buf_dot_glow_speed[1];
+                end
+                imgui.PopItemWidth();
+                if (imgui.IsItemHovered()) then
+                    imgui.SetTooltip('Pulse speed (radians/sec). Higher = faster.');
+                end
+
+                c = imgui.SliderFloat('Pulse Min', buf_dot_glow_min, 0.0, 1.0, '%.2f');
+                if (c) then
+                    changed = true;
+                    renderer.dot_glow_min = buf_dot_glow_min[1];
+                end
+                if (imgui.IsItemHovered()) then
+                    imgui.SetTooltip('Minimum brightness of pulse cycle (0 = fully dim).');
+                end
+
+                c = imgui.SliderFloat('Pulse Max', buf_dot_glow_max, 0.0, 1.0, '%.2f');
+                if (c) then
+                    changed = true;
+                    renderer.dot_glow_max = buf_dot_glow_max[1];
+                end
+                if (imgui.IsItemHovered()) then
+                    imgui.SetTooltip('Maximum brightness of pulse cycle (1 = full bright).');
+                end
+
+                c = imgui.SliderFloat('Glow Intensity', buf_dot_glow_intensity, 0.1, 2.0, '%.2f');
+                if (c) then
+                    changed = true;
+                    renderer.dot_glow_intensity = buf_dot_glow_intensity[1];
+                end
+                if (imgui.IsItemHovered()) then
+                    imgui.SetTooltip('Overall glow brightness multiplier.');
+                end
+            end
 
             c = imgui.SliderFloat('Dot Size', buf_dot_size, 1.0, 20.0, '%.1f');
             if (c) then changed = true; end

@@ -1,4 +1,4 @@
-# ZoneLines v1.0.0 - Zone Line Visualizer for Ashita v4.3
+# ZoneLines v1.1.0 - Zone Line Visualizer for Ashita v4.3
 
 Zone line visualizer for Ashita v4.3. Draws 3D ground markers at zone transition boundaries so you can see where zone lines are before walking into them. All zone line data is pre-extracted from FFXI DAT files.
 
@@ -7,8 +7,10 @@ Zone line visualizer for Ashita v4.3. Draws 3D ground markers at zone transition
 - **846 Zone Lines** across 198 zones, pre-extracted from FFXI DAT files
 - **3D Depth-Tested Markers** - Dots render in world space and hide behind walls/terrain
 - **Terrain-Following** - Dots follow pre-computed navmesh ground heights with cliff flattening
+- **Pulsating Glow** - Configurable dot pulse with adjustable speed, intensity, and min/max brightness
 - **Distance Color Coding** - Optional green/yellow/red coloring based on proximity
 - **Destination Labels** - Zone name and distance displayed above each zone line
+- **Flexible Label Layout** - Distance position (top/bottom/left/right), configurable spacing and separators
 - **Circle Markers** - Portals and trigger-area transitions shown as ground circles with vertical poles
 - **Per-Zone-Line Overrides** - Adjust height, trim, flatten, hide, and pole height per entry
 - **Supplemental Triggers** - Hand-curated entries for script-driven transitions (palace gates, tower portals)
@@ -77,12 +79,16 @@ Settings are saved per-character via Ashita's settings library.
 
 ### Labels
 - **Labels** - Show/hide destination zone names
-- **Distance** - Show/hide distance in yalms
+- **Distance** - Show/hide distance in yalms with position control (top/bottom/left/right)
+- **Label Gap** - Spacing between zone name and distance text
 - **Font Size** - Base font size multiplier
 - **Label Height** - How far above dots the label floats
 - **Min/Max Zoom** - Font scale limits based on distance
 
 ### Dots
+- **Glow Pulse** - Enable pulsating dot halos with configurable speed (0.5-20)
+- **Pulse Min/Max** - Brightness range for the pulse cycle
+- **Glow Intensity** - Overall glow brightness multiplier
 - **Dot Size** - Size of each dot in world units
 - **Dot Glow** - Edge glow intensity (0 = sharp, 1 = solid)
 - **Dot Spacing** - Distance between dots along the zone line
@@ -120,7 +126,9 @@ zonelines/
 - **Zone caching**: Zone line data is cached per zone with a dirty flag, only recomputed on zone change or settings mutation
 - **Pre-allocated D3D matrices**: Identity and ortho matrices are allocated once at module level, not per-frame
 - **Reusable label table**: Label collection uses a counter pattern with table reuse to avoid per-frame allocations
-- **Cached override lookups**: Per-zone-line override keys are computed once per draw loop iteration, not per access
+- **Settings gating**: Color rebuilds and setting syncs only run when settings change, not every frame
+- **D3D state skip**: Render state save/restore cycle is skipped entirely when no zone lines are within render distance
+- **Transform safety**: D3D transform matrices are saved as Lua table copies to prevent cdata staleness when restoring
 
 ## Version History
 

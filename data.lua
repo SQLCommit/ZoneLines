@@ -1,5 +1,5 @@
 --[[
-    ZoneLines v1.0.0 - Data Layer
+    ZoneLines v1.1.0 - Data Layer
     Loads pre-extracted zone line bounding boxes from zones_data.lua,
     supplemental trigger-area transitions from supplemental_zones.lua,
     and pre-computed terrain heights from terrain_heights.lua.
