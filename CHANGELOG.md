@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.2.0
+
+### New Features
+- **Text Outline** - Configurable 8-direction black outline on label text for readability against light backgrounds
+- **Distance Fade** *(suggestion by West Ronfaure)*- Optional dot size fade near the render distance edge with configurable fade zone
+
 ## v1.1.0
 
 ### New Features

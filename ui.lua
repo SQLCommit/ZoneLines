@@ -1,5 +1,5 @@
 --[[
-    ZoneLines v1.1.0 - ImGui Settings & Status Window
+    ZoneLines v1.2.0 - ImGui Settings & Status Window
     Displays zone line bounding boxes for the current zone with
     rendering settings and zone line information.
 ]]--
@@ -35,6 +35,7 @@ local buf_d3d_text_min_scale = { 0.5 };
 local buf_d3d_text_max_scale = { 3.0 };
 local buf_d3d_show_labels    = { true };
 local buf_d3d_show_distance  = { true };
+local buf_d3d_text_outline   = { true };
 local buf_d3d_dist_pos_idx  = { 0 };
 local DIST_POS_NAMES = 'Bottom\0Top\0Left\0Right\0';
 local DIST_POS_VALUES = { 'bottom', 'top', 'left', 'right' };
@@ -44,6 +45,8 @@ local buf_dot_glow_speed     = { 2.0 };
 local buf_dot_glow_intensity = { 0.5 };
 local buf_dot_glow_min       = { 0.4 };
 local buf_dot_glow_max       = { 1.0 };
+local buf_distance_fade      = { false };
+local buf_distance_fade_zone = { 30.0 };  -- displayed as percentage (5-100)
 local buf_dot_color          = { 0.0, 1.0, 0.0 };
 local buf_use_dist_colors    = { false };
 local buf_color_far          = { 0.0, 1.0, 0.0 };
@@ -73,6 +76,7 @@ local function sync_from_settings()
     buf_d3d_text_max_scale[1]   = settings_ref.d3d_text_max_scale or 3.0;
     buf_d3d_show_labels[1]      = (settings_ref.d3d_show_labels ~= false);
     buf_d3d_show_distance[1]    = (settings_ref.d3d_show_distance ~= false);
+    buf_d3d_text_outline[1]     = (settings_ref.d3d_text_outline ~= false);
     local dp = settings_ref.d3d_dist_position or 'bottom';
     for i = 1, #DIST_POS_VALUES do
         if (DIST_POS_VALUES[i] == dp) then buf_d3d_dist_pos_idx[1] = i - 1; break; end
@@ -83,6 +87,8 @@ local function sync_from_settings()
     buf_dot_glow_intensity[1] = settings_ref.dot_glow_intensity or 0.5;
     buf_dot_glow_min[1]       = settings_ref.dot_glow_min or 0.4;
     buf_dot_glow_max[1]       = settings_ref.dot_glow_max or 1.0;
+    buf_distance_fade[1]      = (settings_ref.distance_fade == true);
+    buf_distance_fade_zone[1] = (settings_ref.distance_fade_zone or 0.3) * 100;
     local dc = settings_ref.dot_color or { 0, 1, 0 };
     buf_dot_color[1] = dc[1] or 0; buf_dot_color[2] = dc[2] or 1; buf_dot_color[3] = dc[3] or 0;
     buf_use_dist_colors[1] = (settings_ref.use_dist_colors == true);
@@ -124,6 +130,7 @@ local function sync_to_settings()
     settings_ref.d3d_text_max_scale   = buf_d3d_text_max_scale[1];
     settings_ref.d3d_show_labels      = buf_d3d_show_labels[1];
     settings_ref.d3d_show_distance    = buf_d3d_show_distance[1];
+    settings_ref.d3d_text_outline     = buf_d3d_text_outline[1];
     settings_ref.d3d_dist_position    = DIST_POS_VALUES[buf_d3d_dist_pos_idx[1] + 1] or 'bottom';
     settings_ref.d3d_label_spacing    = buf_d3d_label_spacing[1];
     settings_ref.dot_glow_enabled     = buf_dot_glow_enabled[1];
@@ -131,6 +138,8 @@ local function sync_to_settings()
     settings_ref.dot_glow_intensity   = buf_dot_glow_intensity[1];
     settings_ref.dot_glow_min         = buf_dot_glow_min[1];
     settings_ref.dot_glow_max         = buf_dot_glow_max[1];
+    settings_ref.distance_fade        = buf_distance_fade[1];
+    settings_ref.distance_fade_zone   = buf_distance_fade_zone[1] / 100;
     settings_ref.dot_color   = T{ buf_dot_color[1],   buf_dot_color[2],   buf_dot_color[3] };
     settings_ref.use_dist_colors = buf_use_dist_colors[1];
     settings_ref.color_far   = T{ buf_color_far[1],   buf_color_far[2],   buf_color_far[3] };
@@ -232,6 +241,16 @@ function ui.render(zone_id, zone_name)
                 imgui.SetTooltip('Show zone destination names above markers.');
             end
 
+            imgui.SameLine();
+            c = imgui.Checkbox('Text Outline', buf_d3d_text_outline);
+            if (c) then
+                changed = true;
+                renderer.d3d_text_outline = buf_d3d_text_outline[1];
+            end
+            if (imgui.IsItemHovered()) then
+                imgui.SetTooltip('Black outline on label text for readability on dark backgrounds.');
+            end
+
             c = imgui.Checkbox('Distance', buf_d3d_show_distance);
             if (c) then
                 changed = true;
@@ -302,6 +321,22 @@ function ui.render(zone_id, zone_name)
             if (c) then changed = true; end
             if (imgui.IsItemHovered()) then
                 imgui.SetTooltip('Max distance to render zone line markers.');
+            end
+
+            c = imgui.Checkbox('Distance Fade', buf_distance_fade);
+            if (c) then changed = true; end
+            if (imgui.IsItemHovered()) then
+                imgui.SetTooltip('Shrink dots smoothly near render distance edge instead of hard cutoff.');
+            end
+            if (buf_distance_fade[1]) then
+                imgui.SameLine();
+                imgui.PushItemWidth(120);
+                c = imgui.SliderFloat('Fade Zone##fadezone', buf_distance_fade_zone, 5.0, 100.0, '%.0f%%');
+                if (c) then changed = true; end
+                imgui.PopItemWidth();
+                if (imgui.IsItemHovered()) then
+                    imgui.SetTooltip('Percentage of render distance where dots fade in. Higher = longer gradual fade.');
+                end
             end
 
             imgui.Spacing();

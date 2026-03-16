@@ -1,5 +1,5 @@
 --[[
-    ZoneLines v1.1.0 - Zone Line Visualizer for Ashita v4
+    ZoneLines v1.2.0 - Zone Line Visualizer for Ashita v4
 
     Draws ground markers at zone line positions to help players see
     invisible zone transition boundaries. Zone lines are pre-extracted
@@ -13,12 +13,12 @@
         /zl help         - Show command help
 
     Author: SQLCommit
-    Version: 1.1.0
+    Version: 1.2.0
 ]]--
 
 addon.name    = 'zonelines';
 addon.author  = 'SQLCommit';
-addon.version = '1.1.0';
+addon.version = '1.2.0';
 addon.desc    = 'Visualizes zone line boundaries with ground markers.';
 addon.link    = 'https://github.com/SQLCommit/zonelines';
 
@@ -54,6 +54,7 @@ local default_settings = T{
     d3d_text_max_scale   = 2.3,
     d3d_show_labels      = true,
     d3d_show_distance    = true,
+    d3d_text_outline     = true,       -- black outline on label text
     d3d_dist_position    = 'bottom',  -- 'bottom', 'top', 'left', 'right'
     d3d_label_spacing    = 8,         -- extra pixel gap between name and distance
     dot_glow_enabled     = true,      -- pulsating dots
@@ -61,6 +62,8 @@ local default_settings = T{
     dot_glow_intensity   = 0.5,       -- glow brightness multiplier
     dot_glow_min         = 0.4,       -- pulse minimum (0-1)
     dot_glow_max         = 1.0,       -- pulse maximum (0-1)
+    distance_fade        = false,     -- fade dots by shrinking near render distance edge
+    distance_fade_zone   = 0.3,       -- 0.0-1.0, fraction of render_distance that fades
     zoneline_overrides   = T{
         ['846018170']  = T{ trim = 1.5 },
         ['846083706']  = T{ trim = 1.3 },
@@ -158,6 +161,7 @@ local function sync_renderer(settings_ref)
     renderer.d3d_text_max_scale = settings_ref.d3d_text_max_scale or 3.0;
     renderer.d3d_show_labels    = (settings_ref.d3d_show_labels ~= false);
     renderer.d3d_show_distance  = (settings_ref.d3d_show_distance ~= false);
+    renderer.d3d_text_outline   = (settings_ref.d3d_text_outline ~= false);
     renderer.d3d_dist_position  = settings_ref.d3d_dist_position or 'bottom';
     renderer.d3d_label_spacing  = settings_ref.d3d_label_spacing or 2;
     renderer.dot_glow_enabled   = (settings_ref.dot_glow_enabled ~= false);

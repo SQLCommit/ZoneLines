@@ -1,5 +1,5 @@
 --[[
-    ZoneLines v1.1.0 - Zone Line Rendering via D3D8
+    ZoneLines v1.2.0 - Zone Line Rendering via D3D8
 
     Zone line bounding boxes have a thin dimension (depth you walk through)
     and a wide dimension (spanning the passage). The dotted line is drawn
@@ -116,8 +116,9 @@ local font_baked         = nil;
 local font_baked_size    = 0;
 
 
--- D3D text color (ARGB)
-local D3D_TEXT_WHITE  = 0xFFFFFFFF;
+-- D3D text colors (ARGB)
+local D3D_TEXT_WHITE   = 0xFFFFFFFF;
+local D3D_TEXT_OUTLINE = 0xFF000000;
 
 -- Copy D3DMATRIX cdata fields into a plain Lua table (cdata refs go stale between frames)
 local function copy_matrix(m)
@@ -145,6 +146,7 @@ renderer.d3d_text_min_scale = 0.5; -- min font scale (far away)
 renderer.d3d_text_max_scale = 3.0; -- max font scale (close up)
 renderer.d3d_show_labels   = true;
 renderer.d3d_show_distance = true;
+renderer.d3d_text_outline      = true;  -- black outline on label text
 renderer.d3d_dist_position = 'bottom';  -- 'bottom', 'top', 'left', 'right'
 renderer.d3d_label_spacing = 2;         -- extra pixel gap between name and distance
 renderer.dot_glow_enabled   = true;     -- pulsating dots
@@ -185,7 +187,7 @@ function renderer.init_font_atlas()
         else
             font_init_fail_count = font_init_fail_count + 1;
             if (font_init_fail_count <= 1) then
-                print('[zonelines] font atlas: GetTexID failed — may need game restart to recover');
+                print('[zonelines] font atlas: GetTexID failed - may need game restart to recover');
             end
             return false;
         end
@@ -329,6 +331,29 @@ local function build_text_screen(text, color, sx, sy, z, scale)
     return vi;
 end
 
+-- Outline offsets: 8 directions (cardinal + diagonal) for 1px border.
+local OUTLINE_DIRS = {
+    { -1, -1 }, { 0, -1 }, { 1, -1 },
+    { -1,  0 },            { 1,  0 },
+    { -1,  1 }, { 0,  1 }, { 1,  1 },
+};
+
+-- Draw text with optional black outline (8-directional shadow passes + main pass).
+-- Rendered in d3d_present with alpha blending so anti-aliased edges blend smoothly.
+local function draw_text_outlined(device, text, color, x, y, z, scale)
+    local mv;
+    if (renderer.d3d_text_outline) then
+        for i = 1, 8 do
+            local d = OUTLINE_DIRS[i];
+            mv = build_text_screen(text, D3D_TEXT_OUTLINE, x + d[1], y + d[2], z, scale);
+            if (mv > 0) then device:DrawPrimitiveUP(D3DPT_TRIANGLELIST, mv / 3, text_verts, TEXTURED_VERTEX_SIZE); end
+        end
+    end
+    -- Main text (always on top)
+    mv = build_text_screen(text, color, x, y, z, scale);
+    if (mv > 0) then device:DrawPrimitiveUP(D3DPT_TRIANGLELIST, mv / 3, text_verts, TEXTURED_VERTEX_SIZE); end
+end
+
 -------------------------------------------------------------------------------
 -- Dotted Line Tuning
 -------------------------------------------------------------------------------
@@ -344,6 +369,10 @@ local ZONELINE_OVERRIDES = {};
 
 -- D3D dot size in world units (yalms).
 local D3D_DOT_GLOW_SIZE = 0.35;
+
+-- Distance fade: size-based (alpha doesn't work in beginscene pass 2)
+local DISTANCE_FADE      = false;
+local DISTANCE_FADE_ZONE = 0.3;
 
 -- Reusable labels table (cleared each frame to avoid allocation)
 local frame_labels = {};
@@ -418,6 +447,8 @@ local function apply_settings(s)
     MAX_GRADIENT         = s.rise_distance or 0.9;
     D3D_DOT_GLOW_SIZE    = (s.dot_size or 1.4) * 0.05;
     ZONELINE_OVERRIDES   = s.zoneline_overrides or {};
+    DISTANCE_FADE        = (s.distance_fade == true);
+    DISTANCE_FADE_ZONE   = s.distance_fade_zone or 0.3;
     rebuild_colors(s);
     settings_applied = true;
 end
@@ -945,9 +976,13 @@ local function draw_text_pass(device, view, text_scale)
     device:SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
     device:SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
 
-    -- Alpha test: discard transparent glyph background pixels
+    -- Alpha blending: semi-transparent glyph edges blend smoothly with the scene
+    -- (text is rendered in d3d_present where blending works against the full backbuffer)
+    device:SetRenderState(D3DRS_ALPHABLENDENABLE, 1);
+    device:SetRenderState(D3DRS_SRCBLEND, 5);   -- D3DBLEND_SRCALPHA
+    device:SetRenderState(D3DRS_DESTBLEND, 6);   -- D3DBLEND_INVSRCALPHA
     device:SetRenderState(D3DRS_ALPHATESTENABLE, 1);
-    device:SetRenderState(D3DRS_ALPHAREF, 0x40);
+    device:SetRenderState(D3DRS_ALPHAREF, 0x01);
     device:SetRenderState(D3DRS_ALPHAFUNC, D3DCMP_GREATEREQUAL);
 
     -- Set up ortho projection: screen pixels map 1:1, Z passes through for depth
@@ -983,6 +1018,10 @@ local function draw_text_pass(device, view, text_scale)
                 local dist_factor = ref_dist / math.max(lbl.dist, 1.0);
                 dist_factor = math.max(min_s, math.min(max_s, dist_factor));
                 local fs = base_s * dist_factor;
+                -- Scale text with distance fade so labels shrink with dots
+                if (lbl.fade ~= nil and lbl.fade < 1.0) then
+                    fs = fs * lbl.fade;
+                end
                 local line_height = fs * 14;
                 local dpos = renderer.d3d_dist_position or 'bottom';
                 local spacing = renderer.d3d_label_spacing or 2;
@@ -1036,11 +1075,7 @@ local function draw_text_pass(device, view, text_scale)
                 -- Draw name
                 if (lbl.name ~= nil and ny ~= nil) then
                     nx = sx - name_tw / 2;
-                    local mv = build_text_screen(lbl.name, D3D_TEXT_WHITE,
-                        nx, ny, ndcz, fs);
-                    if (mv > 0) then
-                        device:DrawPrimitiveUP(D3DPT_TRIANGLELIST, mv / 3, text_verts, TEXTURED_VERTEX_SIZE);
-                    end
+                    draw_text_outlined(device, lbl.name, D3D_TEXT_WHITE, nx, ny, ndcz, fs);
                 end
 
                 -- Draw distance
@@ -1054,11 +1089,7 @@ local function draw_text_pass(device, view, text_scale)
                     else
                         dx = sx - dist_tw / 2;
                     end
-                    local mv = build_text_screen(draw_dist_text, D3D_TEXT_WHITE,
-                        dx, dy, ndcz, fs);
-                    if (mv > 0) then
-                        device:DrawPrimitiveUP(D3DPT_TRIANGLELIST, mv / 3, text_verts, TEXTURED_VERTEX_SIZE);
-                    end
+                    draw_text_outlined(device, draw_dist_text, D3D_TEXT_WHITE, dx, dy, ndcz, fs);
                 end
             end
         end
@@ -1214,6 +1245,17 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
                 -- Display distance measures to nearest box edge, not center
                 local display_dist = distance_to_zoneline(player_x, player_z, zl);
 
+                -- Distance fade: shrink geometry near render_distance edge
+                local fade = 1.0;
+                if (DISTANCE_FADE and DISTANCE_FADE_ZONE > 0.001) then
+                    local fade_near = render_dist * (1.0 - DISTANCE_FADE_ZONE);
+                    if (display_dist > fade_near) then
+                        fade = (render_dist - display_dist) / (render_dist - fade_near);
+                        if (fade < 0.0) then fade = 0.0; end
+                        if (fade > 1.0) then fade = 1.0; end
+                    end
+                end
+
                 if (is_curtain_zoneline(zl)) then
                     -- Curtain zone line: compute dot positions along the wider edge
                     local core_col, glow_col = get_d3d_dot_colors(display_dist);
@@ -1236,7 +1278,7 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
                     label_y = cdata.hover_y;
                     label_x = cdata.label_x;
                     label_z = cdata.label_z;
-                    local dot_sz = D3D_DOT_GLOW_SIZE * glow_size_mult;
+                    local dot_sz = D3D_DOT_GLOW_SIZE * glow_size_mult * fade;
                     draw_d3d_style_dots(device, cdata, rx, ry, rz, ux, uy, uz, core_col, glow_col, dot_sz);
                 else
                     -- Non-curtain: circle marker (portals)
@@ -1248,18 +1290,20 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
                     else
                         r = zl.sx or 8.0;
                     end
-                    draw_d3d_circle(device, zl.x, zl.y, zl.z, r, fill_col);
+                    draw_d3d_circle(device, zl.x, zl.y, zl.z, r * fade, fill_col);
 
                     -- Draw vertical pole from circle center up to label height
                     local pole_h = (type(ovr.pole_height) == 'number' and ovr.pole_height > 0)
                         and ovr.pole_height or 4.0;
+                    pole_h = pole_h * fade;
                     local core_col = get_d3d_dot_colors(display_dist);
                     draw_d3d_pole(device, zl.x, zl.y, zl.z, pole_h, rx, ry, rz, core_col);
                     label_y = zl.y - pole_h;  -- move label to top of pole
                 end
 
                 -- Collect labels for text pass (name + distance stacked in screen space)
-                if (want_labels or want_dist) then
+                -- Skip labels when fade is too small (unreadable specks)
+                if ((want_labels or want_dist) and fade >= 0.15) then
                     local text_y = label_y - renderer.d3d_label_offset;
                     local name = nil;
                     local dist_text = nil;
@@ -1275,13 +1319,12 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
                     if (lbl == nil) then lbl = {}; frame_labels[frame_labels_n] = lbl; end
                     lbl.x = label_x; lbl.y = text_y; lbl.z = label_z;
                     lbl.name = name; lbl.dist_text = dist_text; lbl.dist = display_dist;
+                    lbl.fade = fade;
                 end
             end
         end
 
-        -- ── Pass 2: Text labels ──
-        -- (Extracted to standalone function to stay within LuaJIT 60-upvalue limit)
-        draw_text_pass(device, view, text_scale);
+        -- (Labels rendered separately in renderer.render / d3d_present with alpha blending)
     end);
 
     -- ══ ALWAYS restore render states (even if drawing errored out) ══
@@ -1337,6 +1380,92 @@ function renderer.render(zone_lines, player_x, player_y, player_z, s)
     -- Initialize font atlas for D3D text (uses default ImGui font)
     if (renderer.hide_behind_walls and not renderer.is_font_atlas_ready()) then
         pcall(renderer.init_font_atlas);
+    end
+
+    -- Draw text labels in d3d_present where alpha blending works against the
+    -- rendered scene (beginscene has no backbuffer to blend against).
+    -- Labels lose depth occlusion but gain clean anti-aliased edges.
+    if (frame_labels_n <= 0 or not renderer.is_font_atlas_ready()) then return; end
+    if (renderer.cached_view == nil) then return; end
+
+    local device = d3d8.get_device();
+    if (device == nil) then return; end
+
+    -- Save render states
+    local _, sv_fvf      = device:GetVertexShader();
+    local _, sv_tex      = device:GetTexture(0);
+    local _, sv_ps       = device:GetPixelShader();
+    local _, sv_ablend   = device:GetRenderState(D3DRS_ALPHABLENDENABLE);
+    local _, sv_srcblend = device:GetRenderState(D3DRS_SRCBLEND);
+    local _, sv_dstblend = device:GetRenderState(D3DRS_DESTBLEND);
+    local _, sv_atest    = device:GetRenderState(D3DRS_ALPHATESTENABLE);
+    local _, sv_aref     = device:GetRenderState(D3DRS_ALPHAREF);
+    local _, sv_afunc    = device:GetRenderState(D3DRS_ALPHAFUNC);
+    local _, sv_light    = device:GetRenderState(D3DRS_LIGHTING);
+    local _, sv_zenable  = device:GetRenderState(D3DRS_ZENABLE);
+    local _, sv_zwrite   = device:GetRenderState(D3DRS_ZWRITEENABLE);
+    local _, sv_cull     = device:GetRenderState(D3DRS_CULLMODE);
+    local _, raw_world   = device:GetTransform(D3DTS_WORLD);
+    local sv_world = (raw_world ~= nil) and copy_matrix(raw_world) or nil;
+    local _, raw_view    = device:GetTransform(2);
+    local sv_view = (raw_view ~= nil) and copy_matrix(raw_view) or nil;
+    local _, raw_proj    = device:GetTransform(3);
+    local sv_proj = (raw_proj ~= nil) and copy_matrix(raw_proj) or nil;
+    local _, sv_colorop   = device:GetTextureStageState(0, D3DTSS_COLOROP);
+    local _, sv_colorarg1 = device:GetTextureStageState(0, D3DTSS_COLORARG1);
+    local _, sv_alphaop   = device:GetTextureStageState(0, D3DTSS_ALPHAOP);
+    local _, sv_alphaarg1 = device:GetTextureStageState(0, D3DTSS_ALPHAARG1);
+    local _, sv_magfilter = device:GetTextureStageState(0, D3DTSS_MAGFILTER);
+    local _, sv_minfilter = device:GetTextureStageState(0, D3DTSS_MINFILTER);
+    local _, sv_addru     = device:GetTextureStageState(0, D3DTSS_ADDRESSU);
+    local _, sv_addrv     = device:GetTextureStageState(0, D3DTSS_ADDRESSV);
+    local _, sv_s1_colorop = device:GetTextureStageState(1, D3DTSS_COLOROP);
+    local _, sv_s1_alphaop = device:GetTextureStageState(1, D3DTSS_ALPHAOP);
+
+    -- Disable pixel shader (ImGui/d3d8to9 may leave one active)
+    device:SetPixelShader(0);
+    device:SetRenderState(D3DRS_LIGHTING, 0);
+    device:SetRenderState(D3DRS_CULLMODE, 1);  -- D3DCULL_NONE
+    device:SetRenderState(D3DRS_ZENABLE, 0);   -- no depth test for labels
+    device:SetRenderState(D3DRS_ZWRITEENABLE, 0);
+
+    local text_ok, text_err = pcall(draw_text_pass, device, renderer.cached_view, renderer.d3d_text_scale);
+
+    -- Restore all states
+    if (sv_world ~= nil) then device:SetTransform(D3DTS_WORLD, table_to_matrix(sv_world, restore_world)); end
+    if (sv_view ~= nil) then device:SetTransform(2, table_to_matrix(sv_view, restore_view)); end
+    if (sv_proj ~= nil) then device:SetTransform(3, table_to_matrix(sv_proj, restore_proj)); end
+    device:SetTexture(0, sv_tex);
+    device:SetRenderState(D3DRS_LIGHTING, sv_light);
+    device:SetRenderState(D3DRS_ZENABLE, sv_zenable);
+    device:SetRenderState(D3DRS_ZWRITEENABLE, sv_zwrite);
+    device:SetRenderState(D3DRS_CULLMODE, sv_cull);
+    device:SetRenderState(D3DRS_ALPHABLENDENABLE, sv_ablend);
+    device:SetRenderState(D3DRS_SRCBLEND, sv_srcblend);
+    device:SetRenderState(D3DRS_DESTBLEND, sv_dstblend);
+    device:SetRenderState(D3DRS_ALPHATESTENABLE, sv_atest);
+    device:SetRenderState(D3DRS_ALPHAREF, sv_aref);
+    device:SetRenderState(D3DRS_ALPHAFUNC, sv_afunc);
+    device:SetVertexShader(sv_fvf);
+    if (sv_ps ~= nil) then device:SetPixelShader(sv_ps); end
+    device:SetTextureStageState(0, D3DTSS_COLOROP, sv_colorop);
+    device:SetTextureStageState(0, D3DTSS_COLORARG1, sv_colorarg1);
+    device:SetTextureStageState(0, D3DTSS_ALPHAOP, sv_alphaop);
+    device:SetTextureStageState(0, D3DTSS_ALPHAARG1, sv_alphaarg1);
+    device:SetTextureStageState(0, D3DTSS_MAGFILTER, sv_magfilter);
+    device:SetTextureStageState(0, D3DTSS_MINFILTER, sv_minfilter);
+    device:SetTextureStageState(0, D3DTSS_ADDRESSU, sv_addru);
+    device:SetTextureStageState(0, D3DTSS_ADDRESSV, sv_addrv);
+    device:SetTextureStageState(1, D3DTSS_COLOROP, sv_s1_colorop);
+    device:SetTextureStageState(1, D3DTSS_ALPHAOP, sv_s1_alphaop);
+
+    if (not text_ok) then
+        if (not renderer._text_err_logged) then
+            print(chat.header('zonelines') .. chat.error('text render error: ' .. tostring(text_err)));
+            renderer._text_err_logged = true;
+        end
+    else
+        renderer._text_err_logged = false;
     end
 end
 
