@@ -1,10 +1,18 @@
 # Changelog
 
+## v1.2.1
+
+### Bug Fixes
+- **Text Outline** - Fixed outline rendering to preserve depth testing
+
+### Improvements
+- Replaced manual fade clamping with `math.clamp`
+
 ## v1.2.0
 
 ### New Features
-- **Text Outline** - Configurable 8-direction black outline on label text for readability against light backgrounds
-- **Distance Fade** *(suggestion by West Ronfaure)*- Optional dot size fade near the render distance edge with configurable fade zone
+- **Text Outline** - Optional black outline on zone name and distance labels for improved readability (default off)
+- **Distance Fade** *(suggestion by West Ronfaure)* - Optional dot size fade near the render distance edge with configurable fade zone
 
 ## v1.1.0
 

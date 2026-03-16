@@ -1,4 +1,4 @@
-# ZoneLines v1.2.0 - Zone Line Visualizer for Ashita v4.3
+# ZoneLines v1.2.1 - Zone Line Visualizer for Ashita v4.3
 
 Zone line visualizer for Ashita v4.3. Draws 3D ground markers at zone transition boundaries so you can see where zone lines are before walking into them. All zone line data is pre-extracted from FFXI DAT files.
 
@@ -9,9 +9,10 @@ Zone line visualizer for Ashita v4.3. Draws 3D ground markers at zone transition
 - **Terrain-Following** - Dots follow pre-computed navmesh ground heights with cliff flattening
 - **Pulsating Glow** - Configurable dot pulse with adjustable speed, intensity, and min/max brightness
 - **Distance Color Coding** - Optional green/yellow/red coloring based on proximity
-- **Destination Labels** - Zone name and distance displayed above each zone line with optional black text outline
+- **Destination Labels** - Zone name and distance displayed above each zone line
 - **Flexible Label Layout** - Distance position (top/bottom/left/right), configurable spacing and separators
 - **Distance Fade** - Optional dot size fade near the render distance edge
+- **Text Outline** - Optional black outline on labels for improved readability
 - **Circle Markers** - Portals and trigger-area transitions shown as ground circles with vertical poles
 - **Per-Zone-Line Overrides** - Adjust height, trim, flatten, hide, and pole height per entry
 - **Supplemental Triggers** - Hand-curated entries for script-driven transitions (palace gates, tower portals)
@@ -58,7 +59,7 @@ The addon's data files are pre-generated offline — no extraction happens at ru
 
 ### Rendering
 
-Zone line dots are rendered as 3D primitives using D3D8 `DrawPrimitiveUP` in the `d3d_beginscene` event (pass 2, before game world geometry). The game's depth buffer naturally occludes markers behind walls and terrain. Text labels are drawn separately in `d3d_present` where alpha blending is available, enabling clean anti-aliased text with optional 8-direction black outline for readability.
+Zone lines are rendered as 3D primitives using D3D8 `DrawPrimitiveUP` in the `d3d_beginscene` event (pass 2, before game world geometry). The game's depth buffer naturally occludes markers behind walls and terrain. Text labels use a screen-space ortho projection with the font atlas texture for pixel-perfect rendering while preserving depth testing.
 
 For passage-type zone lines, hovering dots are drawn along the wider dimension of the oriented bounding box, interpolating pre-computed terrain heights. Circle markers are used for portals and area triggers, with a vertical pole connecting the ground circle to the label above.
 
@@ -80,12 +81,12 @@ Settings are saved per-character via Ashita's settings library.
 
 ### Labels
 - **Labels** - Show/hide destination zone names
-- **Text Outline** - Black outline around label text for readability
 - **Distance** - Show/hide distance in yalms with position control (top/bottom/left/right)
 - **Label Gap** - Spacing between zone name and distance text
 - **Font Size** - Base font size multiplier
 - **Label Height** - How far above dots the label floats
 - **Min/Max Zoom** - Font scale limits based on distance
+- **Text Outline** - Draw black outline around label text for readability
 
 ### Dots
 - **Glow Pulse** - Enable pulsating dot halos with configurable speed (0.5-20)
