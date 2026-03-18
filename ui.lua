@@ -1,5 +1,5 @@
 --[[
-    ZoneLines v1.2.1 - ImGui Settings & Status Window
+    ZoneLines v1.2.2 - ImGui Settings & Status Window
     Displays zone line bounding boxes for the current zone with
     rendering settings and zone line information.
 ]]--
@@ -184,7 +184,6 @@ end
 
 function ui.render(zone_id, zone_name)
     if (not ui.is_open[1]) then return; end
-    if (zone_id == nil or zone_id <= 0) then return; end
     if (data_ref == nil or settings_ref == nil) then return; end
 
     -- Handle reset
@@ -210,7 +209,7 @@ function ui.render(zone_id, zone_name)
 
         -- Header
         imgui.TextColored({ 0.3, 0.7, 1.0, 1.0 },
-            string.format('Zone: %s (ID: %d)', zone_name or '???', zone_id));
+            string.format('Zone: %s (ID: %d)', zone_name or '???', zone_id or 0));
 
         local total = data_ref.get_total_count();
         local static = data_ref.static_total or 0;

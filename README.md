@@ -1,4 +1,4 @@
-# ZoneLines v1.2.1 - Zone Line Visualizer for Ashita v4.3
+# ZoneLines v1.2.2 - Zone Line Visualizer for Ashita v4.3
 
 Zone line visualizer for Ashita v4.3. Draws 3D ground markers at zone transition boundaries so you can see where zone lines are before walking into them. All zone line data is pre-extracted from FFXI DAT files.
 

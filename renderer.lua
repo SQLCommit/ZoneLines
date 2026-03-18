@@ -1,5 +1,5 @@
 --[[
-    ZoneLines v1.2.1 - Zone Line Rendering via D3D8
+    ZoneLines v1.2.2 - Zone Line Rendering via D3D8
 
     Zone line bounding boxes have a thin dimension (depth you walk through)
     and a wide dimension (spanning the passage). The dotted line is drawn

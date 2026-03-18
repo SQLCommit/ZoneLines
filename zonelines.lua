@@ -1,5 +1,5 @@
 --[[
-    ZoneLines v1.2.1 - Zone Line Visualizer for Ashita v4
+    ZoneLines v1.2.2 - Zone Line Visualizer for Ashita v4
 
     Draws ground markers at zone line positions to help players see
     invisible zone transition boundaries. Zone lines are pre-extracted
@@ -13,12 +13,12 @@
         /zl help         - Show command help
 
     Author: SQLCommit
-    Version: 1.2.1
+    Version: 1.2.2
 ]]--
 
 addon.name    = 'zonelines';
 addon.author  = 'SQLCommit';
-addon.version = '1.2.1';
+addon.version = '1.2.2';
 addon.desc    = 'Visualizes zone line boundaries with ground markers.';
 addon.link    = 'https://github.com/SQLCommit/zonelines';
 
@@ -90,6 +90,7 @@ local default_settings = T{
 local s = nil;           -- settings reference
 local current_zone = 0;
 local zone_name = '';
+local zoning = false;    -- true during zone transition (suppresses rendering)
 
 -------------------------------------------------------------------------------
 -- Helpers
@@ -287,12 +288,19 @@ ashita.events.register('command', 'zonelines_command', function(e)
 end);
 
 -------------------------------------------------------------------------------
--- Event: Incoming Packet (zone change detection)
+-- Event: packet_in (zone transition detection)
+-- Suppress rendering during zone transitions to prevent stale markers.
+-- Also invalidates cache on zone exit so new zone data loads cleanly.
 -------------------------------------------------------------------------------
-ashita.events.register('packet_in', 'zonelines_packet_in', function(e)
-    -- 0x000A: Zone Enter — refresh cache for new zone
-    if (e.id == 0x000A) then
+ashita.events.register('packet_in', 'zonelines_pkt_in', function(e)
+    if (e.id == 0x00B) then
+        -- Zone exit: suppress rendering and invalidate cache
+        zoning = true;
+        current_zone = 0;
         data.invalidate_cache();
+    elseif (e.id == 0x00A) then
+        -- Zone enter: re-enable rendering
+        zoning = false;
     end
 end);
 
@@ -306,6 +314,7 @@ ashita.events.register('d3d_beginscene', 'zonelines_beginscene', function()
     if (renderer.d3d_pass ~= 2) then return; end
     if (not renderer.hide_behind_walls) then return; end
     if (s == nil or not s.visible) then return; end
+    if (zoning) then return; end
 
     local zid = get_zone_id();
     if (zid == nil or zid <= 0) then return; end
@@ -374,7 +383,7 @@ ashita.events.register('d3d_present', 'zonelines_present', function()
 
     -- Sync settings and initialize font atlas for D3D text
     local px, py, pz = get_player_pos();
-    if (s ~= nil and s.visible and px ~= nil) then
+    if (s ~= nil and s.visible and px ~= nil and not zoning) then
         local zone_lines = data.get_zone_lines(current_zone);
         renderer.render(zone_lines, px, py, pz, s);
     end

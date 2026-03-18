@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.2.2
+
+### Bug Fixes
+- **Stale Zone Labels During Fast Zoning** - Fixed labels from previous zones persisting when zoning quickly (e.g. with packetflow through multiple zones). Added zone transition detection via 0x00B/0x00A packets that suppresses all marker rendering during zone transitions and immediately invalidates the data cache on zone exit.
+
 ## v1.2.1
 
 ### Bug Fixes
