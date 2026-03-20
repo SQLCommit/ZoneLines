@@ -1,4 +1,4 @@
-# ZoneLines v1.2.2 - Zone Line Visualizer for Ashita v4.3
+# ZoneLines v1.2.3 - Zone Line Visualizer for Ashita v4.3
 
 Zone line visualizer for Ashita v4.3. Draws 3D ground markers at zone transition boundaries so you can see where zone lines are before walking into them. All zone line data is pre-extracted from FFXI DAT files.
 
@@ -16,7 +16,7 @@ Zone line visualizer for Ashita v4.3. Draws 3D ground markers at zone transition
 - **Circle Markers** - Portals and trigger-area transitions shown as ground circles with vertical poles
 - **Per-Zone-Line Overrides** - Adjust height, trim, flatten, hide, and pole height per entry
 - **Supplemental Triggers** - Hand-curated entries for script-driven transitions (palace gates, tower portals)
-- **Settings Window** - Full ImGui UI with tooltips on every control
+- **Settings Window** - Sidebar + detail panel UI with 6 categories and tooltips on every control
 - **Per-Character Settings** - Saved automatically via Ashita's settings system
 
 ## Requirements
@@ -77,41 +77,33 @@ For passage-type zone lines, hovering dots are drawn along the wider dimension o
 
 ## Settings
 
-Settings are saved per-character via Ashita's settings library.
+Settings are saved per-character via Ashita's settings library. The settings window uses a sidebar + detail panel layout with 6 categories. A visibility toggle and zone info header are always visible at the top.
+
+### Markers
+- **Dot Size / Spacing / Hover Height / Cliff Flatten** - Shape controls for dot geometry
+- **Glow Pulse** - Enable pulsating dot halos with speed, min/max brightness, and intensity
+- **Edge Glow** - Dot edge softness (0 = sharp, 1 = solid fill)
 
 ### Labels
-- **Labels** - Show/hide destination zone names
-- **Distance** - Show/hide distance in yalms with position control (top/bottom/left/right)
+- **Labels / Distance** - Show/hide destination names and distance in yalms
+- **Text Outline** - Black outline on label text for readability
+- **Distance Position** - Place distance text top/bottom/left/right of zone name
 - **Label Gap** - Spacing between zone name and distance text
-- **Font Size** - Base font size multiplier
-- **Label Height** - How far above dots the label floats
-- **Min/Max Zoom** - Font scale limits based on distance
-- **Text Outline** - Draw black outline around label text for readability
-
-### Dots
-- **Glow Pulse** - Enable pulsating dot halos with configurable speed (0.5-20)
-- **Pulse Min/Max** - Brightness range for the pulse cycle
-- **Glow Intensity** - Overall glow brightness multiplier
-- **Dot Size** - Size of each dot in world units
-- **Dot Glow** - Edge glow intensity (0 = sharp, 1 = solid)
-- **Dot Spacing** - Distance between dots along the zone line
-- **Hover Height** - How far above ground dots float
-- **Cliff Flatten** - Max height change per dot before flattening slopes
-
-### Fade
-- **Distance Fade** - Shrink dots near the render distance edge
-- **Fade Zone** - Fraction of render distance that fades (0-1)
+- **Font Size / Label Height / Min Zoom / Max Zoom** - Text sizing controls
 
 ### Colors
 - **Dot Color** - Base color for all dots
-- **Distance Colors** - Toggle proximity-based coloring (far/mid/close)
+- **Distance Colors** - Toggle proximity-based coloring with far/mid/close pickers
 
-### Per-Zone-Line Overrides
-- **Hide** - Hide specific zone lines (e.g., door-activated transitions)
-- **Height** - Vertical offset adjustment
-- **Trim** - Inset dots from edges (avoid railings/walls)
-- **Cliff Flatten** - Per-entry slope flattening override
-- **Pole Height** - Vertical pole height for circle markers
+### Fade
+- **Render Distance** - Max distance to render zone line markers
+- **Distance Fade** - Shrink dots near the render distance edge with configurable fade zone
+
+### Zone Lines
+- Table of all zone lines in the current zone with destination, position, size, and source
+
+### Overrides
+- **Per-zone-line adjustments** - Hide, height, trim, cliff flatten, and pole height per entry
 
 ## File Structure
 
@@ -133,9 +125,12 @@ zonelines/
 - **Zone caching**: Zone line data is cached per zone with a dirty flag, only recomputed on zone change or settings mutation
 - **Pre-allocated D3D matrices**: Identity and ortho matrices are allocated once at module level, not per-frame
 - **Reusable label table**: Label collection uses a counter pattern with table reuse to avoid per-frame allocations
+- **Pooled curtain positions**: Dot position tables for curtain zone lines are pooled and reused each frame, eliminating per-frame table allocations from the heaviest rendering path
 - **Settings gating**: Color rebuilds and setting syncs only run when settings change, not every frame
-- **D3D state skip**: Render state save/restore cycle is skipped entirely when no zone lines are within render distance
+- **D3D state skip**: Render state save/restore cycle is skipped entirely when no zone lines are within render distance (pre-check padded by box size to avoid false culls)
+- **Edge-based culling**: Per-zone-line visibility uses nearest box edge distance, matching the fade math so wide zone lines fade correctly at the boundary
 - **Transform safety**: D3D transform matrices are saved as Lua table copies to prevent cdata staleness when restoring
+- **Throttled error logging**: Error messages are rate-limited (30s per error type) to avoid chat spam while ensuring issues are always reported
 
 ## Version History
 
@@ -144,7 +139,7 @@ See [CHANGELOG.md](CHANGELOG.md) for full version history.
 ## Thanks
 
 - **Ashita Team** - atom0s, thorny, and the [Ashita Discord](https://discord.gg/Ashita) community
-- **West Ronfaure** - Distance fade suggestion
+- **West Ronfaure** - Distance/Smoothstep fade suggestion
 
 ## License
 

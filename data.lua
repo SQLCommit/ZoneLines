@@ -1,5 +1,5 @@
 --[[
-    ZoneLines v1.2.2 - Data Layer
+    ZoneLines v1.2.3 - Data Layer
     Loads pre-extracted zone line bounding boxes from zones_data.lua,
     supplemental trigger-area transitions from supplemental_zones.lua,
     and pre-computed terrain heights from terrain_heights.lua.
@@ -11,6 +11,8 @@
 ]]--
 
 require 'common';
+
+local chat = require 'chat';
 
 local data = {};
 
@@ -50,7 +52,7 @@ function data.init(addon_path)
     if (ok and static ~= nil) then
         data.static_data = static;
     else
-        print(string.format('[zonelines] WARNING: Failed to load %s', zones_file));
+        print(chat.header('zonelines'):append(chat.error('Zone line data file missing - no markers will be shown.')));
     end
 
     -- Filter out skip-listed entries (NPC interactions, not zone lines)
@@ -92,6 +94,8 @@ function data.init(addon_path)
                 end
             end
         end
+    else
+        print(chat.header('zonelines'):append(chat.message('Supplemental zone data missing - some trigger-based zone lines won\'t appear.')));
     end
 
     -- Load pre-computed terrain heights from navmesh data
@@ -99,6 +103,8 @@ function data.init(addon_path)
     local ok3, terrain = pcall(dofile, terrain_file);
     if (ok3 and terrain ~= nil) then
         data.terrain_data = terrain;
+    else
+        print(chat.header('zonelines'):append(chat.message('Terrain height data missing - dots will use estimated ground height.')));
     end
 
     -- Count total static entries (DAT + supplemental)

@@ -1,5 +1,5 @@
 --[[
-    ZoneLines v1.2.2 - Supplemental Zone Transition Data
+    ZoneLines v1.2.3 - Supplemental Zone Transition Data
     Hand-curated entries for zone transitions that use trigger areas or NPC
     interactions instead of standard zone line boundaries in DAT files.
 

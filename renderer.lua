@@ -1,5 +1,5 @@
 --[[
-    ZoneLines v1.2.2 - Zone Line Rendering via D3D8
+    ZoneLines v1.2.3 - Zone Line Rendering via D3D8
 
     Zone line bounding boxes have a thin dimension (depth you walk through)
     and a wide dimension (spanning the passage). The dotted line is drawn
@@ -140,15 +140,15 @@ renderer.cached_proj       = nil;
 renderer.cached_vp_w       = 0;
 renderer.cached_vp_h       = 0;
 renderer.hide_behind_walls = true;
-renderer.d3d_text_scale    = 1.0;   -- base font size multiplier
-renderer.d3d_label_offset  = 0.6;  -- world yalms above dots for label
-renderer.d3d_text_min_scale = 0.5; -- min font scale (far away)
-renderer.d3d_text_max_scale = 3.0; -- max font scale (close up)
+renderer.d3d_text_scale    = 0.9;   -- base font size multiplier
+renderer.d3d_label_offset  = 0.5;  -- world yalms above dots for label
+renderer.d3d_text_min_scale = 0.7; -- min font scale (far away)
+renderer.d3d_text_max_scale = 2.3; -- max font scale (close up)
 renderer.d3d_show_labels   = true;
 renderer.d3d_show_distance = true;
 renderer.d3d_text_outline  = false;
 renderer.d3d_dist_position = 'bottom';  -- 'bottom', 'top', 'left', 'right'
-renderer.d3d_label_spacing = 2;         -- extra pixel gap between name and distance
+renderer.d3d_label_spacing = 8;         -- extra pixel gap between name and distance
 renderer.dot_glow_enabled   = true;     -- pulsating dots
 renderer.dot_glow_speed     = 2.0;      -- pulse speed (radians/sec)
 renderer.dot_glow_intensity = 0.5;      -- glow brightness multiplier
@@ -156,10 +156,26 @@ renderer.dot_glow_min       = 0.4;      -- pulse minimum (0-1)
 renderer.dot_glow_max       = 1.0;      -- pulse maximum (0-1)
 
 -------------------------------------------------------------------------------
--- Font Atlas: Initialize from ImGui's baked font atlas for D3D text rendering
+-- Throttled error logging: one message per key per cooldown period.
+-- Errors are never lost (first occurrence always prints), but repeats are
+-- suppressed for 30 seconds to avoid chat spam during persistent failures.
 -------------------------------------------------------------------------------
 
-local font_init_fail_count = 0;  -- rate-limit failure logs
+local err_cooldowns = {};
+local ERR_COOLDOWN = 30;  -- seconds between repeated messages for the same error
+
+local function log_error(key, text)
+    local now = os.clock();
+    local last = err_cooldowns[key];
+    if (last == nil or (now - last) >= ERR_COOLDOWN) then
+        err_cooldowns[key] = now;
+        print(chat.header('zonelines'):append(chat.error(text)));
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Font Atlas: Initialize from ImGui's baked font atlas for D3D text rendering
+-------------------------------------------------------------------------------
 
 function renderer.init_font_atlas()
     local size = imgui.GetFontSize();
@@ -170,13 +186,22 @@ function renderer.init_font_atlas()
     end
 
     local font = imgui.GetFont();
-    if (font == nil) then return false; end
+    if (font == nil) then
+        log_error('font', 'Text labels unavailable - ImGui font not ready. Try reloading the addon.');
+        return false;
+    end
 
     local atlas = font.ContainerAtlas;
-    if (atlas == nil) then return false; end
+    if (atlas == nil) then
+        log_error('font', 'Text labels unavailable - font atlas not found. Ashita v4.3.0.2+ is required.');
+        return false;
+    end
 
     local tex_ref = atlas.TexRef;
-    if (tex_ref == nil) then return false; end
+    if (tex_ref == nil) then
+        log_error('font', 'Text labels unavailable - font texture not found. Ashita v4.3.0.2+ is required.');
+        return false;
+    end
 
     -- Try GetTexID method, fall back to _TexID field (matches mobhud)
     local tex_id_ok, tex_id = pcall(function() return tex_ref:GetTexID(); end);
@@ -185,10 +210,7 @@ function renderer.init_font_atlas()
         if (raw_ok and raw_id ~= nil and raw_id ~= 0) then
             tex_id = raw_id;
         else
-            font_init_fail_count = font_init_fail_count + 1;
-            if (font_init_fail_count <= 1) then
-                print('[zonelines] font atlas: GetTexID failed — may need game restart to recover');
-            end
+            log_error('font', 'Text labels unavailable - font texture ID missing. Try /addon reload zonelines or restart the game.');
             return false;
         end
     end
@@ -222,7 +244,10 @@ function renderer.init_font_atlas()
         end
     end
 
-    if (baked == nil) then return false; end
+    if (baked == nil) then
+        log_error('font_bake', 'Text labels unavailable - font bake data not found. Ashita v4.3.0.2+ is required.');
+        return false;
+    end
 
     -- Re-read TexID (atlas texture may have changed after bake)
     local tex_id2_ok, tex_id2 = pcall(function() return tex_ref:GetTexID(); end);
@@ -234,7 +259,10 @@ function renderer.init_font_atlas()
     local base_ok, base_ptr = pcall(function()
         return ffi.cast('IDirect3DBaseTexture8*', ffi.cast('uintptr_t', tex_id));
     end);
-    if (not base_ok or base_ptr == nil) then return false; end
+    if (not base_ok or base_ptr == nil) then
+        log_error('font_cast', 'Text labels unavailable - D3D texture setup failed. Try reloading the addon.');
+        return false;
+    end
 
     font_atlas_tex_ptr = base_ptr;
     font_baked = baked;
@@ -242,7 +270,6 @@ function renderer.init_font_atlas()
     local sz_ok, sz = pcall(function() return baked.Size; end);
     font_baked_size = (sz_ok and sz and sz > 0) and sz or size;
 
-    font_init_fail_count = 0;
     return true;
 end
 
@@ -375,6 +402,10 @@ local DISTANCE_FADE_ZONE = 0.3;
 -- Reusable labels table (cleared each frame to avoid allocation)
 local frame_labels = {};
 local frame_labels_n = 0;
+
+-- Reusable curtain position pool (same pattern — grow on demand, reuse each frame)
+local cdata_pool = {};
+local cdata_pool_n = 0;
 
 
 -- Convert RGB floats (0-1) to D3D ARGB uint32 with given alpha byte (0-255).
@@ -591,8 +622,17 @@ local function compute_curtain_positions(wx, wy, wz, half_sx, half_sy, half_sz,
         col_end = math.floor((1.0 - t_trim) * math.max(1, num_dots - 1));
     end
 
+    -- Acquire a pooled cdata object (grows on demand, reused each frame)
+    cdata_pool_n = cdata_pool_n + 1;
+    local cd = cdata_pool[cdata_pool_n];
+    if (cd == nil) then
+        cd = { positions = {}, positions_n = 0, hover_y = 0, label_x = 0, label_z = 0 };
+        cdata_pool[cdata_pool_n] = cd;
+    end
+    local positions = cd.positions;
+    local pos_n = 0;
+
     -- Compute world positions with per-dot terrain following
-    local positions = {};
     local label_hover_y = synth_ground - HOVER_HEIGHT;  -- fallback for label
 
     for col = col_start, col_end do
@@ -638,17 +678,21 @@ local function compute_curtain_positions(wx, wy, wz, half_sx, half_sy, half_sz,
 
         -- Skip dots where terrain is off-navmesh (both samples false)
         if (pos_y ~= nil) then
-            positions[#positions + 1] = {
-                wx = wx + wrx,
-                wy = pos_y,
-                wz = wz + wrz,
-            };
+            pos_n = pos_n + 1;
+            local p = positions[pos_n];
+            if (p == nil) then
+                p = { wx = 0, wy = 0, wz = 0 };
+                positions[pos_n] = p;
+            end
+            p.wx = wx + wrx;
+            p.wy = pos_y;
+            p.wz = wz + wrz;
         end
     end
 
     -- Auto-flatten: if terrain variance is small (e.g. town zone lines, flat hallways),
     -- snap all dots to median height for a clean straight line.
-    local n = #positions;
+    local n = pos_n;
     if (n >= 2) then
         local min_y, max_y = positions[1].wy, positions[1].wy;
         for i = 2, n do
@@ -765,7 +809,11 @@ local function compute_curtain_positions(wx, wy, wz, half_sx, half_sy, half_sz,
     local label_wx = wx + label_lx * cos_r - label_lz * sin_r;
     local label_wz = wz + label_lx * sin_r + label_lz * cos_r;
 
-    return { positions = positions, hover_y = label_hover_y, label_x = label_wx, label_z = label_wz };
+    cd.positions_n = n;
+    cd.hover_y = label_hover_y;
+    cd.label_x = label_wx;
+    cd.label_z = label_wz;
+    return cd;
 end
 
 
@@ -903,7 +951,9 @@ end
 
 local function draw_d3d_style_dots(device, cdata, rx, ry, rz, ux, uy, uz, core_col, glow_col, dot_size)
     local sz = dot_size or D3D_DOT_GLOW_SIZE;
-    for _, p in ipairs(cdata.positions) do
+    local positions = cdata.positions;
+    for i = 1, cdata.positions_n do
+        local p = positions[i];
         draw_d3d_dot_gradient(device, rx, ry, rz, ux, uy, uz,
             p.wx, p.wy, p.wz, sz, core_col, glow_col);
     end
@@ -1118,12 +1168,16 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
     -- Quick pre-check: skip entire render state manipulation if no zone line
     -- is within render distance.  Setting/restoring D3D state on every frame
     -- even when nothing is drawn can cause sky blinking in open areas.
+    -- Uses center distance + half largest box dimension as a conservative bound
+    -- so wide zone lines near the boundary aren't falsely culled (cheap, no trig).
     local render_dist = s.render_distance or 100.0;
     local any_visible = false;
     for _, zl in ipairs(zone_lines) do
         local dx = player_x - zl.x;
         local dz = player_z - zl.z;
-        if (dx * dx + dz * dz <= render_dist * render_dist) then
+        local half_box = math.max(zl.sx or 0, zl.sz or 0) / 2;
+        local padded = render_dist + half_box;
+        if (dx * dx + dz * dz <= padded * padded) then
             any_visible = true;
             break;
         end
@@ -1208,8 +1262,9 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
         local want_dist    = renderer.d3d_show_distance;
         local text_scale   = renderer.d3d_text_scale;
 
-        -- Collect label data during marker loop (drawn in text pass)
+        -- Reset per-frame pools (reused each frame to avoid GC pressure)
         frame_labels_n = 0;
+        cdata_pool_n = 0;
 
         -- ── Glow pulse (modulates existing dots — no separate pass needed) ──
         local glow_pulse = 1.0;
@@ -1227,24 +1282,26 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
         -- ── Pass 1: Untextured colored markers (dots + circles) ──
 
         for _, zl in ipairs(zone_lines) do
-            local dist = distance_xz(player_x, player_z, zl.x, zl.z);
+            -- Use edge distance for both culling and display so wide zone lines
+            -- near the render boundary aren't culled before fade can touch them.
+            local display_dist = distance_to_zoneline(player_x, player_z, zl);
 
             -- Cache override lookup once per zone line
             local rect_key = tostring(zl.rect_id);
             local ovr = ZONELINE_OVERRIDES[rect_key] or {};
-            if (dist <= render_dist and not ovr.hide) then
+            if (display_dist <= render_dist and not ovr.hide) then
                 local label_y = zl.y;
                 local label_x = zl.x;
                 local label_z = zl.z;
-                -- Display distance measures to nearest box edge, not center
-                local display_dist = distance_to_zoneline(player_x, player_z, zl);
 
-                -- Distance fade: shrink geometry near render_distance edge
+                -- Distance fade: smoothstep curve near render_distance edge.
+                -- Dots ease into shrinking and ease into disappearing (no abrupt pop).
                 local fade = 1.0;
                 if (DISTANCE_FADE and DISTANCE_FADE_ZONE > 0.001) then
                     local fade_near = render_dist * (1.0 - DISTANCE_FADE_ZONE);
                     if (display_dist > fade_near) then
-                        fade = math.clamp((render_dist - display_dist) / (render_dist - fade_near), 0.0, 1.0);
+                        local t = math.clamp((render_dist - display_dist) / (render_dist - fade_near), 0.0, 1.0);
+                        fade = t * t * (3.0 - 2.0 * t);
                     end
                 end
 
@@ -1350,31 +1407,11 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
     device:SetTextureStageState(1, D3DTSS_COLOROP, save_s1_colorop);
     device:SetTextureStageState(1, D3DTSS_ALPHAOP, save_s1_alphaop);
 
-    -- Log drawing errors (previously silently swallowed by outer pcall)
     if (not draw_ok) then
-        if (not renderer._draw_err_logged) then
-            print(chat.header('zonelines') .. chat.error('draw_d3d error: ' .. tostring(draw_err)));
-            renderer._draw_err_logged = true;
-        end
-    else
-        renderer._draw_err_logged = false;
+        log_error('draw', 'Rendering error - markers may flicker. (' .. tostring(draw_err) .. ')');
     end
 end
 
 
-
--------------------------------------------------------------------------------
--- render: Called from d3d_present — syncs settings and initializes font atlas.
--- Marker drawing happens in draw_d3d (d3d_beginscene).
--------------------------------------------------------------------------------
-
-function renderer.render(zone_lines, player_x, player_y, player_z, s)
-    if (zone_lines == nil or #zone_lines == 0) then return; end
-
-    -- Initialize font atlas for D3D text (uses default ImGui font)
-    if (renderer.hide_behind_walls and not renderer.is_font_atlas_ready()) then
-        pcall(renderer.init_font_atlas);
-    end
-end
 
 return renderer;

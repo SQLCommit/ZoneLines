@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.2.3
+
+### UI Rewrite
+- **Sidebar + Detail Panel** - Settings window replaced with category-based layout matching MobHUD pattern. Left sidebar with 6 categories (Markers, Labels, Colors, Fade, Zone Lines, Overrides), right detail panel with focused settings per category
+- **Consolidated widget buffers** - All ImGui buffers packed into single `B` table to avoid LuaJIT upvalue pressure
+- **Color theme** - Orange sub-headers, green sidebar selection, cyan info text, grey dimmed text
+- **Tooltips on all controls** - Every interactive widget including Reset to Defaults has a hover tooltip
+- **Persistent footer** - `/zl help` and right-aligned Reset to Defaults button always visible below the panel
+
+### Performance
+- **Curtain position pooling** - Dot position tables for curtain zone lines are now pooled and reused each frame instead of allocated fresh. Eliminates ~15,000-31,000 short-lived table allocations per second in zones with many visible zone lines (cities, hubs)
+- **Removed dead `renderer.render()` call** - Font atlas init was already handled in `d3d_present`; removed redundant code path
+
+### Improvements
+- **Throttled error logging** - All error messages use a 30-second cooldown per error type to avoid chat spam during persistent failures
+- **User-friendly font atlas errors** - Every font atlas failure path now prints a clear message explaining the issue and what to do (e.g. "Ashita v4.3.0.2+ is required")
+- **Data load warnings** - Missing supplemental zone data or terrain height files now print informational messages instead of failing silently
+- **Reset to Defaults** - Deep copies defaults to prevent mutation of the defaults table; syncs renderer fields immediately so all visual changes take effect without toggling each setting
+- **Nil guards on position data** - Zone line table position formatting guards against nil coordinates
+
+### Fixes
+- **Distance fade smoothing** *(suggestion by West Ronfaure)* - Replaced linear fade ramp with smoothstep curve so dots ease into shrinking and ease into disappearing instead of snapping
+- **Distance fade culling** - Pre-check was killing zone lines before the fade math could run on them. Per-zone-line culling now uses edge distance (nearest box edge) instead of center distance, padded conservatively to avoid false early-outs
+- **Chat output consistency** - Fixed renderer error logging to use `:append()` pattern instead of `..` concatenation
+- **Settings fallback defaults** - Aligned all three default value locations (default_settings, sync_renderer fallbacks, renderer module declarations) to prevent drift
+
 ## v1.2.2
 
 ### Bug Fixes

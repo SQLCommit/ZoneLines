@@ -1,5 +1,5 @@
 --[[
-    ZoneLines v1.2.2 - Zone Line Visualizer for Ashita v4
+    ZoneLines v1.2.3 - Zone Line Visualizer for Ashita v4
 
     Draws ground markers at zone line positions to help players see
     invisible zone transition boundaries. Zone lines are pre-extracted
@@ -13,12 +13,12 @@
         /zl help         - Show command help
 
     Author: SQLCommit
-    Version: 1.2.2
+    Version: 1.2.3
 ]]--
 
 addon.name    = 'zonelines';
 addon.author  = 'SQLCommit';
-addon.version = '1.2.2';
+addon.version = '1.2.3';
 addon.desc    = 'Visualizes zone line boundaries with ground markers.';
 addon.link    = 'https://github.com/SQLCommit/zonelines';
 
@@ -37,10 +37,10 @@ local ui       = require 'ui';
 -------------------------------------------------------------------------------
 local default_settings = T{
     visible          = true,
-    render_distance  = 300.0,
+    render_distance  = 90.0,
     dot_size         = 1.4,
     dot_spacing      = 0.3,
-    dot_glow         = 0.8,
+    dot_glow         = 1.0,
     hover_height     = 0.5,
     rise_distance    = 0.9,
     dot_color        = T{ 0.0, 1.0, 0.94 },  -- main dot color
@@ -54,20 +54,21 @@ local default_settings = T{
     d3d_text_max_scale   = 2.3,
     d3d_show_labels      = true,
     d3d_show_distance    = true,
-    d3d_text_outline     = false,
+    d3d_text_outline     = true,
     d3d_dist_position    = 'bottom',  -- 'bottom', 'top', 'left', 'right'
     d3d_label_spacing    = 8,         -- extra pixel gap between name and distance
     dot_glow_enabled     = true,      -- pulsating dots
-    dot_glow_speed       = 2.0,       -- pulse speed (radians/sec)
-    dot_glow_intensity   = 0.5,       -- glow brightness multiplier
-    dot_glow_min         = 0.4,       -- pulse minimum (0-1)
+    dot_glow_speed       = 4.0,       -- pulse speed (radians/sec)
+    dot_glow_intensity   = 2.0,       -- glow brightness multiplier
+    dot_glow_min         = 0.69,      -- pulse minimum (0-1)
     dot_glow_max         = 1.0,       -- pulse maximum (0-1)
-    distance_fade        = false,     -- fade dots by shrinking near render distance edge
-    distance_fade_zone   = 0.3,       -- 0.0-1.0, fraction of render_distance that fades
+    distance_fade        = true,      -- fade dots by shrinking near render distance edge
+    distance_fade_zone   = 0.6,       -- 0.0-1.0, fraction of render_distance that fades
     zoneline_overrides   = T{
         ['846018170']  = T{ trim = 1.5 },
         ['846083706']  = T{ trim = 1.3 },
         ['846214778']  = T{ height = 0.5 },
+        ['846737530']  = T{ trim = 0.1, flatten = 0.1, height = 4.1 },
         ['812529274']  = T{ trim = 1.7 },
         ['813119098']  = T{ trim = 2.9 },
         ['879572602']  = T{ trim = 0.4 },
@@ -79,8 +80,8 @@ local default_settings = T{
         ['1869770106'] = T{ trim = 3.7 },            -- Mog House trim
         ['1936878970'] = T{ trim = 3.7 },            -- Mog House trim
         ['1970433402'] = T{ trim = 3.7 },            -- Mog House trim
-        ['923901']     = T{ pole_height = 1.7 },     -- Windurst Walls → Heaven's Tower
-        ['924201']     = T{ pole_height = 1.7 },     -- Heaven's Tower → Windurst Walls
+        ['923901']     = T{ pole_height = 1.7 },     -- Windurst Walls -> Heaven's Tower
+        ['924201']     = T{ pole_height = 1.7 },     -- Heaven's Tower -> Windurst Walls
     },
 };
 
@@ -156,15 +157,15 @@ end
 -- Sync settings to renderer fields
 -------------------------------------------------------------------------------
 local function sync_renderer(settings_ref)
-    renderer.d3d_text_scale     = settings_ref.d3d_text_scale or 1.0;
-    renderer.d3d_label_offset   = settings_ref.d3d_label_offset or 0.6;
-    renderer.d3d_text_min_scale = settings_ref.d3d_text_min_scale or 0.5;
-    renderer.d3d_text_max_scale = settings_ref.d3d_text_max_scale or 3.0;
+    renderer.d3d_text_scale     = settings_ref.d3d_text_scale or 0.9;
+    renderer.d3d_label_offset   = settings_ref.d3d_label_offset or 0.5;
+    renderer.d3d_text_min_scale = settings_ref.d3d_text_min_scale or 0.7;
+    renderer.d3d_text_max_scale = settings_ref.d3d_text_max_scale or 2.3;
     renderer.d3d_show_labels    = (settings_ref.d3d_show_labels ~= false);
     renderer.d3d_show_distance  = (settings_ref.d3d_show_distance ~= false);
     renderer.d3d_text_outline   = (settings_ref.d3d_text_outline == true);
     renderer.d3d_dist_position  = settings_ref.d3d_dist_position or 'bottom';
-    renderer.d3d_label_spacing  = settings_ref.d3d_label_spacing or 2;
+    renderer.d3d_label_spacing  = settings_ref.d3d_label_spacing or 8;
     renderer.dot_glow_enabled   = (settings_ref.dot_glow_enabled ~= false);
     renderer.dot_glow_speed     = settings_ref.dot_glow_speed or 2.0;
     renderer.dot_glow_intensity = settings_ref.dot_glow_intensity or 0.5;
@@ -379,13 +380,6 @@ ashita.events.register('d3d_present', 'zonelines_present', function()
         ui.sync_settings();
         renderer.mark_settings_dirty();
         settings.save();
-    end
-
-    -- Sync settings and initialize font atlas for D3D text
-    local px, py, pz = get_player_pos();
-    if (s ~= nil and s.visible and px ~= nil and not zoning) then
-        local zone_lines = data.get_zone_lines(current_zone);
-        renderer.render(zone_lines, px, py, pz, s);
     end
 
     -- Draw UI window
