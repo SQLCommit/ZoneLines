@@ -1,0 +1,43 @@
+============================================================
+ ZoneLines - Optional Label Fonts
+============================================================
+
+The fonts in this folder are OPTIONAL. ZoneLines renders its labels
+with GdiFonts, which can only use fonts that are INSTALLED in Windows.
+
+This addon does NOT install fonts for you. By design it never touches
+your system (no registry changes, no font installs) - it only reads
+these files to learn their names. You install the ones you want, and
+they then appear in the font picker.
+
+
+HOW TO INSTALL A FONT
+------------------------------------------------------------
+1. Open this "fonts" folder in Windows Explorer.
+2. Select the .ttf file(s) you want, right-click -> Install
+   (or "Install for all users" if you have admin).
+3. FULLY CLOSE AND RELAUNCH FFXI.
+   (The game only loads fonts at startup - a /addon reload is NOT
+    enough; you must restart the game.)
+4. In game: /addon reload zonelines
+   -> open the config -> Labels -> Sizing -> Font
+   The installed font(s) now appear in the dropdown.
+
+
+ADD YOUR OWN FONT
+------------------------------------------------------------
+Drop any .ttf / .otf into this folder, install it (steps above),
+restart the game, and it will show up in the picker by its real
+font name. (Fonts you have NOT installed are hidden from the picker
+so you never get a blank label.)
+
+
+BUNDLED FONTS
+------------------------------------------------------------
+  GrammaraNormal-RvLv.ttf  -> "Grammara"        (FFXIV-style look)
+  Oswald-Regular.ttf       -> "Oswald Regular"  (clean condensed sans)
+  MysticGate.ttf           -> "Mystic Gate"     (fantasy display)
+
+The built-in Windows fonts (Arial, Calibri, Segoe UI, Consolas,
+Verdana, Tahoma, Trebuchet MS, Times New Roman) are always available
+without installing anything.

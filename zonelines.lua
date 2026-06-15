@@ -1,5 +1,5 @@
 --[[
-    ZoneLines v1.2.3 - Zone Line Visualizer for Ashita v4
+    ZoneLines v1.3.0 - Zone Line Visualizer for Ashita v4
 
     Draws ground markers at zone line positions to help players see
     invisible zone transition boundaries. Zone lines are pre-extracted
@@ -13,12 +13,12 @@
         /zl help         - Show command help
 
     Author: SQLCommit
-    Version: 1.2.3
+    Version: 1.3.0
 ]]--
 
 addon.name    = 'zonelines';
 addon.author  = 'SQLCommit';
-addon.version = '1.2.3';
+addon.version = '1.3.0';
 addon.desc    = 'Visualizes zone line boundaries with ground markers.';
 addon.link    = 'https://github.com/SQLCommit/zonelines';
 
@@ -27,6 +27,14 @@ require 'common';
 local chat     = require 'chat';
 local d3d8     = require 'd3d8';
 local settings = require 'settings';
+
+-- Drop our own submodules from the require cache so '/addon reload' actually
+-- re-reads edits to them. Ashita keeps require()'d modules in package.loaded
+-- across reloads, so without this a reload re-runs only this entry script and
+-- keeps the stale cached data/renderer/ui (edits appear to "not take").
+package.loaded['data']     = nil;
+package.loaded['renderer'] = nil;
+package.loaded['ui']       = nil;
 
 local data     = require 'data';
 local renderer = require 'renderer';
@@ -43,8 +51,8 @@ local default_settings = T{
     dot_glow         = 1.0,
     hover_height     = 0.5,
     rise_distance    = 0.9,
-    dot_color        = T{ 0.0, 1.0, 0.94 },  -- main dot color
-    use_dist_colors  = false,                  -- use distance-based colors
+    dot_color        = T{ 0.0, 1.0, 0.94 },
+    use_dist_colors  = false,
     color_far        = T{ 0.0, 1.0, 0.0 },   -- green  (>= 20y)
     color_mid        = T{ 1.0, 1.0, 0.0 },   -- yellow (< 20y)
     color_close      = T{ 1.0, 0.0, 0.0 },   -- red    (< 10y)
@@ -52,9 +60,11 @@ local default_settings = T{
     d3d_label_offset     = 0.5,
     d3d_text_min_scale   = 0.7,
     d3d_text_max_scale   = 2.3,
+    d3d_font_family      = 'Arial',    -- GdiFonts label font family
+    d3d_outline_width    = 2,          -- label outline thickness
+    d3d_bold             = true,       -- bold labels
     d3d_show_labels      = true,
     d3d_show_distance    = true,
-    d3d_text_outline     = true,
     d3d_dist_position    = 'bottom',  -- 'bottom', 'top', 'left', 'right'
     d3d_label_spacing    = 8,         -- extra pixel gap between name and distance
     dot_glow_enabled     = true,      -- pulsating dots
@@ -157,20 +167,22 @@ end
 -- Sync settings to renderer fields
 -------------------------------------------------------------------------------
 local function sync_renderer(settings_ref)
-    renderer.d3d_text_scale     = settings_ref.d3d_text_scale or 0.9;
-    renderer.d3d_label_offset   = settings_ref.d3d_label_offset or 0.5;
-    renderer.d3d_text_min_scale = settings_ref.d3d_text_min_scale or 0.7;
-    renderer.d3d_text_max_scale = settings_ref.d3d_text_max_scale or 2.3;
+    renderer.d3d_text_scale     = settings_ref.d3d_text_scale or default_settings.d3d_text_scale;
+    renderer.d3d_label_offset   = settings_ref.d3d_label_offset or default_settings.d3d_label_offset;
+    renderer.d3d_text_min_scale = settings_ref.d3d_text_min_scale or default_settings.d3d_text_min_scale;
+    renderer.d3d_text_max_scale = settings_ref.d3d_text_max_scale or default_settings.d3d_text_max_scale;
+    renderer.gdi_font_family    = settings_ref.d3d_font_family or default_settings.d3d_font_family;
+    renderer.gdi_outline_width  = settings_ref.d3d_outline_width or default_settings.d3d_outline_width;
+    renderer.gdi_bold           = (settings_ref.d3d_bold ~= false);
     renderer.d3d_show_labels    = (settings_ref.d3d_show_labels ~= false);
     renderer.d3d_show_distance  = (settings_ref.d3d_show_distance ~= false);
-    renderer.d3d_text_outline   = (settings_ref.d3d_text_outline == true);
-    renderer.d3d_dist_position  = settings_ref.d3d_dist_position or 'bottom';
-    renderer.d3d_label_spacing  = settings_ref.d3d_label_spacing or 8;
+    renderer.d3d_dist_position  = settings_ref.d3d_dist_position or default_settings.d3d_dist_position;
+    renderer.d3d_label_spacing  = settings_ref.d3d_label_spacing or default_settings.d3d_label_spacing;
     renderer.dot_glow_enabled   = (settings_ref.dot_glow_enabled ~= false);
-    renderer.dot_glow_speed     = settings_ref.dot_glow_speed or 2.0;
-    renderer.dot_glow_intensity = settings_ref.dot_glow_intensity or 0.5;
-    renderer.dot_glow_min       = settings_ref.dot_glow_min or 0.4;
-    renderer.dot_glow_max       = settings_ref.dot_glow_max or 1.0;
+    renderer.dot_glow_speed     = settings_ref.dot_glow_speed or default_settings.dot_glow_speed;
+    renderer.dot_glow_intensity = settings_ref.dot_glow_intensity or default_settings.dot_glow_intensity;
+    renderer.dot_glow_min       = settings_ref.dot_glow_min or default_settings.dot_glow_min;
+    renderer.dot_glow_max       = settings_ref.dot_glow_max or default_settings.dot_glow_max;
 end
 
 -------------------------------------------------------------------------------
@@ -179,8 +191,15 @@ end
 ashita.events.register('load', 'zonelines_load', function()
     s = settings.load(default_settings);
 
-    -- D3D depth-tested rendering is always on
-    renderer.hide_behind_walls = true;
+    -- Strip dead settings keys left over from older versions so they don't
+    -- linger in saved files (re-save only when one was actually present).
+    if (s.d3d_text_outline ~= nil) then
+        s.d3d_text_outline = nil;
+        pcall(settings.save);
+    end
+
+    renderer.hide_behind_walls = true;   -- depth occlusion always on
+    pcall(renderer.scan_fonts);   -- list common + installed bundled fonts (addons/zonelines/fonts/)
     sync_renderer(s);
 
     -- Initialize data layer (loads zone line data from DAT files)
@@ -203,6 +222,7 @@ end);
 ashita.events.register('unload', 'zonelines_unload', function()
     ui.sync_settings();
     pcall(settings.save);
+    pcall(renderer.cleanup_gdi);   -- release gdifonts label textures
 end);
 
 -------------------------------------------------------------------------------
@@ -210,7 +230,7 @@ end);
 -------------------------------------------------------------------------------
 ashita.events.register('command', 'zonelines_command', function(e)
     local args = e.command:args();
-    if (#args == 0 or not args[1]:any('/zl', '/zonelines', '/zoneline')) then
+    if (#args == 0 or not args[1]:lower():any('/zl', '/zonelines', '/zoneline')) then
         return;
     end
 
@@ -218,35 +238,30 @@ ashita.events.register('command', 'zonelines_command', function(e)
 
     local cmd = (#args >= 2) and args[2]:lower() or 'toggle';
 
-    -- /zl - Toggle window
     if (cmd == 'toggle') then
         ui.is_open[1] = not ui.is_open[1];
         return;
     end
 
-    -- /zl show
     if (cmd == 'show') then
         s.visible = true;
-        settings.save();
+        pcall(settings.save);
         msg_success('Zone line markers visible.');
         return;
     end
 
-    -- /zl hide
     if (cmd == 'hide') then
         s.visible = false;
-        settings.save();
+        pcall(settings.save);
         msg('Zone line markers hidden.');
         return;
     end
 
-    -- /zl help
     if (cmd == 'help') then
         print_help();
         return;
     end
 
-    -- /zl resetui
     if (cmd:any('resetui', 'reset_ui')) then
         ui.reset_pending = true;
         ui.is_open[1] = true;
@@ -254,7 +269,6 @@ ashita.events.register('command', 'zonelines_command', function(e)
         return;
     end
 
-    -- /zl list
     if (cmd == 'list') then
         local zid = get_zone_id();
         if (zid == nil or zid <= 0) then
@@ -295,12 +309,13 @@ end);
 -------------------------------------------------------------------------------
 ashita.events.register('packet_in', 'zonelines_pkt_in', function(e)
     if (e.id == 0x00B) then
-        -- Zone exit: suppress rendering and invalidate cache
+        -- zone exit
         zoning = true;
         current_zone = 0;
         data.invalidate_cache();
+        renderer.invalidate_curtain_cache();
     elseif (e.id == 0x00A) then
-        -- Zone enter: re-enable rendering
+        -- zone enter
         zoning = false;
     end
 end);
@@ -333,7 +348,6 @@ end);
 -- Also caches view matrix and resets pass counter for next frame.
 -------------------------------------------------------------------------------
 ashita.events.register('d3d_present', 'zonelines_present', function()
-    -- Reset pass counter for next frame
     renderer.d3d_pass = 0;
 
     -- Cache view matrix for billboard orientation in next frame's beginscene
@@ -357,32 +371,26 @@ ashita.events.register('d3d_present', 'zonelines_present', function()
             end
         end
 
-        -- Initialize font atlas for D3D text (deferred — ImGui ready at d3d_present)
-        if (not renderer.is_font_atlas_ready()) then
-            pcall(renderer.init_font_atlas);
-        end
     end
 
     -- Character login gate
     local zid = get_zone_id();
     if (zid == nil or zid <= 0) then return; end
 
-    -- Track zone changes
     if (zid ~= current_zone) then
         current_zone = zid;
         zone_name = get_zone_name(zid);
         data.invalidate_cache();
+        renderer.invalidate_curtain_cache();
     end
 
-    -- Save settings if UI flagged a change
     if (ui.settings_dirty) then
         ui.settings_dirty = false;
         ui.sync_settings();
         renderer.mark_settings_dirty();
-        settings.save();
+        pcall(settings.save);
     end
 
-    -- Draw UI window
     ui.render(current_zone, zone_name);
 end);
 

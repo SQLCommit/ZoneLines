@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.3.0
+
+### Clean Label Text (GdiFonts)
+- **Rewrote label rendering** - Zone-line labels now render via GdiFonts (GDI+) to per-string textures drawn as depth-tested billboards, replacing the borrowed ImGui font atlas. Text is sharp at any distance with no bleed or softening, and is still occluded correctly behind walls and terrain
+- **Fixed fog tint on labels** - Zone fog no longer tints label text or outlines (`D3DRS_FOGENABLE` is now saved and restored around the marker pass)
+- **Fixed white edge fringe** - Raised the alpha-test reference so the transparent label border no longer bleeds a faint white edge
+
+### Custom Font System
+- **Font picker** - New Font selector in Labels offers a set of common Windows fonts plus any TTF/OTF you place in `fonts/` (and have installed), with a **Bold** toggle alongside it
+- **Outline thickness slider** - Label outline is now an adjustable slider instead of an on/off toggle
+- **Bundled optional fonts** - Ships Grammara, Mystic Gate, and Oswald in `fonts/` with an install readme. The addon never installs fonts itself (read-only by design); the picker only lists fonts you have actually installed, so there are no blank labels
+
+### Performance
+- **Curtain position cache** - Per-zone-line dot positions (terrain interpolation, 3-pass smoothing, gradient flattening, and table allocations) are now cached and reused across frames, recomputing only when settings change or the player crosses a zone line. In busy areas with many visible zone lines this removes nearly all of the per-frame work from the heaviest rendering path
+
+### Bug Fixes
+- **Fixed COM texture reference leak** - The D3D8 state save called `GetTexture` without releasing the returned (AddRef'd) reference, slowly accumulating VRAM across zone changes over a long session. The reference is now released each frame
+- **Fixed alpha-test state leak** - `ALPHAREF` / `ALPHAFUNC` set during the label pass are now saved and restored, so they no longer leak into the game's world rendering (foliage, fence, and hair alpha cutouts)
+- **Hardened override reads** - Per-zone-line override keys (`trim` / `hide` / `height`) are now type-guarded against LuaJIT `T{}` sugar-method collisions, matching the existing `flatten` / `pole_height` guards
+- **Case-insensitive commands** - `/ZL` and other mixed-case spellings now work
+
+### Internals
+- **Single source of truth for defaults** - Collapsed several divergent copies of the default values into one `default_settings` table that every sync path and UI buffer reads from
+- **Reliable `/addon reload`** - The entry script clears the `package.loaded` cache for its submodules so reloads pick up edits to them
+- **Removed dead "Text Outline" setting** - Replaced by the outline-thickness slider; the orphaned key is stripped from saved settings on load
+- **Reset to Defaults preserves overrides** - Resetting no longer wipes your per-zone-line tweaks
+- **Safer saves** - All `settings.save()` calls are wrapped in `pcall`
+
 ## v1.2.3
 
 ### UI Rewrite
@@ -19,6 +47,17 @@
 - **Data load warnings** - Missing supplemental zone data or terrain height files now print informational messages instead of failing silently
 - **Reset to Defaults** - Deep copies defaults to prevent mutation of the defaults table; syncs renderer fields immediately so all visual changes take effect without toggling each setting
 - **Nil guards on position data** - Zone line table position formatting guards against nil coordinates
+
+### Defaults Updated
+- Render distance: 300 -> 90
+- Dot glow (edge): 0.8 -> 1.0
+- Text outline: off -> on
+- Glow pulse speed: 2 -> 4
+- Glow intensity: 0.5 -> 2.0
+- Pulse min brightness: 0.4 -> 0.69
+- Distance fade: off -> on
+- Distance fade zone: 30% -> 60%
+- Added override for zone line 846737530 (trim, flatten, height)
 
 ### Fixes
 - **Distance fade smoothing** *(suggestion by West Ronfaure)* - Replaced linear fade ramp with smoothstep curve so dots ease into shrinking and ease into disappearing instead of snapping

@@ -1,6 +1,6 @@
 --[[
-    ZoneLines v1.2.3 - Supplemental Zone Transition Data
-    Hand-curated entries for zone transitions that use trigger areas or NPC
+    ZoneLines v1.3.0 - Supplemental Zone Transition Data
+    Hand-added entries for zone transitions that use trigger areas or NPC
     interactions instead of standard zone line boundaries in DAT files.
 
     These transitions don't have RID entries in FFXI's DAT files because they

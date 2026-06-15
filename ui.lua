@@ -1,5 +1,5 @@
 --[[
-    ZoneLines v1.2.3 - ImGui Settings & Status Window
+    ZoneLines v1.3.0 - ImGui Settings & Status Window
     Sidebar + detail panel layout matching MobHUD pattern.
     Categories: Markers, Labels, Colors, Fade, Zone Lines, Overrides.
 ]]--
@@ -22,7 +22,11 @@ ui.settings_dirty = false;
 ui.reset_pending = false;
 
 -------------------------------------------------------------------------------
--- Widget buffers packed into single table (LuaJIT upvalue limit)
+-- Widget buffers packed into single table (LuaJIT upvalue limit).
+-- NOTE: these initial values are placeholders only — sync_from_settings()
+-- overwrites every one at init from the saved settings (which settings.load
+-- has already filled from default_settings). The single source of truth for
+-- defaults is default_settings in zonelines.lua.
 -------------------------------------------------------------------------------
 
 local B = {
@@ -39,8 +43,10 @@ local B = {
     d3d_text_max_scale   = { 3.0 },
     d3d_show_labels      = { true },
     d3d_show_distance    = { true },
-    d3d_text_outline     = { false },
     d3d_dist_pos_idx     = { 0 },
+    d3d_font_idx         = { 0 },
+    d3d_outline_width    = { 2.0 },
+    d3d_bold             = { true },
     d3d_label_spacing    = { 2 },
     dot_glow_enabled     = { true },
     dot_glow_speed       = { 2.0 },
@@ -58,6 +64,18 @@ local B = {
 
 local DIST_POS_NAMES = 'Bottom\0Top\0Left\0Right\0';
 local DIST_POS_VALUES = { 'bottom', 'top', 'left', 'right' };
+
+-- Label font families (GdiFonts). Combo index -> family name.
+-- Font picker is dynamic: renderer.font_list = common Windows fonts + any
+-- TTF/OTF dropped into addons/zonelines/fonts/ (auto-registered at addon load).
+local function font_values()
+    local l = renderer.font_list;
+    if (l == nil or #l == 0) then return { 'Arial' }; end
+    return l;
+end
+local function font_names()
+    return table.concat(font_values(), '\0') .. '\0';
+end
 
 -- Per-zone-line override buffers (keyed by tostring(rect_id))
 local override_bufs = {};
@@ -105,8 +123,10 @@ end
 local function sync_renderer_fields()
     renderer.d3d_show_labels    = B.d3d_show_labels[1];
     renderer.d3d_show_distance  = B.d3d_show_distance[1];
-    renderer.d3d_text_outline   = B.d3d_text_outline[1];
     renderer.d3d_dist_position  = DIST_POS_VALUES[B.d3d_dist_pos_idx[1] + 1] or 'bottom';
+    renderer.gdi_font_family    = font_values()[B.d3d_font_idx[1] + 1] or 'Arial';
+    renderer.gdi_outline_width  = B.d3d_outline_width[1];
+    renderer.gdi_bold           = B.d3d_bold[1];
     renderer.d3d_label_spacing  = B.d3d_label_spacing[1];
     renderer.d3d_text_scale     = B.d3d_text_scale[1];
     renderer.d3d_label_offset   = B.d3d_label_offset[1];
@@ -124,41 +144,54 @@ end
 -------------------------------------------------------------------------------
 
 local function sync_from_settings()
-    if (settings_ref == nil) then return; end
-    B.render_distance[1]    = settings_ref.render_distance or 100.0;
-    B.dot_size[1]           = settings_ref.dot_size or 1.4;
-    B.dot_spacing[1]        = settings_ref.dot_spacing or 0.3;
-    B.dot_glow[1]           = settings_ref.dot_glow or 0.15;
-    B.hover_height[1]       = settings_ref.hover_height or 0.5;
-    B.rise_distance[1]      = settings_ref.rise_distance or 0.9;
+    if (settings_ref == nil or defaults_ref == nil) then return; end
+    B.render_distance[1]    = settings_ref.render_distance or defaults_ref.render_distance;
+    B.dot_size[1]           = settings_ref.dot_size or defaults_ref.dot_size;
+    B.dot_spacing[1]        = settings_ref.dot_spacing or defaults_ref.dot_spacing;
+    B.dot_glow[1]           = settings_ref.dot_glow or defaults_ref.dot_glow;
+    B.hover_height[1]       = settings_ref.hover_height or defaults_ref.hover_height;
+    B.rise_distance[1]      = settings_ref.rise_distance or defaults_ref.rise_distance;
     B.visible[1]            = (settings_ref.visible ~= false);
-    B.d3d_text_scale[1]     = settings_ref.d3d_text_scale or 1.0;
-    B.d3d_label_offset[1]   = settings_ref.d3d_label_offset or 0.6;
-    B.d3d_text_min_scale[1] = settings_ref.d3d_text_min_scale or 0.5;
-    B.d3d_text_max_scale[1] = settings_ref.d3d_text_max_scale or 3.0;
+    B.d3d_text_scale[1]     = settings_ref.d3d_text_scale or defaults_ref.d3d_text_scale;
+    B.d3d_label_offset[1]   = settings_ref.d3d_label_offset or defaults_ref.d3d_label_offset;
+    B.d3d_text_min_scale[1] = settings_ref.d3d_text_min_scale or defaults_ref.d3d_text_min_scale;
+    B.d3d_text_max_scale[1] = settings_ref.d3d_text_max_scale or defaults_ref.d3d_text_max_scale;
     B.d3d_show_labels[1]    = (settings_ref.d3d_show_labels ~= false);
     B.d3d_show_distance[1]  = (settings_ref.d3d_show_distance ~= false);
-    B.d3d_text_outline[1]   = (settings_ref.d3d_text_outline == true);
-    local dp = settings_ref.d3d_dist_position or 'bottom';
+    local fnt = settings_ref.d3d_font_family or defaults_ref.d3d_font_family;
+    local fv = font_values();
+    local fidx = nil;
+    for i = 1, #fv do if (fv[i] == fnt) then fidx = i - 1; break; end end
+    if (fidx == nil) then
+        -- Saved font isn't in the scanned list (e.g. not installed this session).
+        -- Keep it so the user's choice still shows and round-trips instead of
+        -- silently snapping to the first font in the list.
+        fv[#fv + 1] = fnt;
+        fidx = #fv - 1;
+    end
+    B.d3d_font_idx[1] = fidx;
+    B.d3d_outline_width[1] = settings_ref.d3d_outline_width or defaults_ref.d3d_outline_width;
+    B.d3d_bold[1] = (settings_ref.d3d_bold ~= false);
+    local dp = settings_ref.d3d_dist_position or defaults_ref.d3d_dist_position;
     for i = 1, #DIST_POS_VALUES do
         if (DIST_POS_VALUES[i] == dp) then B.d3d_dist_pos_idx[1] = i - 1; break; end
     end
-    B.d3d_label_spacing[1]  = settings_ref.d3d_label_spacing or 2;
+    B.d3d_label_spacing[1]  = settings_ref.d3d_label_spacing or defaults_ref.d3d_label_spacing;
     B.dot_glow_enabled[1]   = (settings_ref.dot_glow_enabled ~= false);
-    B.dot_glow_speed[1]     = settings_ref.dot_glow_speed or 2.0;
-    B.dot_glow_intensity[1] = settings_ref.dot_glow_intensity or 0.5;
-    B.dot_glow_min[1]       = settings_ref.dot_glow_min or 0.4;
-    B.dot_glow_max[1]       = settings_ref.dot_glow_max or 1.0;
+    B.dot_glow_speed[1]     = settings_ref.dot_glow_speed or defaults_ref.dot_glow_speed;
+    B.dot_glow_intensity[1] = settings_ref.dot_glow_intensity or defaults_ref.dot_glow_intensity;
+    B.dot_glow_min[1]       = settings_ref.dot_glow_min or defaults_ref.dot_glow_min;
+    B.dot_glow_max[1]       = settings_ref.dot_glow_max or defaults_ref.dot_glow_max;
     B.distance_fade[1]      = (settings_ref.distance_fade == true);
-    B.distance_fade_zone[1] = (settings_ref.distance_fade_zone or 0.3) * 100;
-    local dc = settings_ref.dot_color or { 0, 1, 0 };
+    B.distance_fade_zone[1] = (settings_ref.distance_fade_zone or defaults_ref.distance_fade_zone) * 100;
+    local dc = settings_ref.dot_color or defaults_ref.dot_color;
     B.dot_color[1] = dc[1] or 0; B.dot_color[2] = dc[2] or 1; B.dot_color[3] = dc[3] or 0;
     B.use_dist_colors[1] = (settings_ref.use_dist_colors == true);
-    local cf = settings_ref.color_far or { 0, 1, 0 };
+    local cf = settings_ref.color_far or defaults_ref.color_far;
     B.color_far[1] = cf[1] or 0; B.color_far[2] = cf[2] or 1; B.color_far[3] = cf[3] or 0;
-    local cm = settings_ref.color_mid or { 1, 1, 0 };
+    local cm = settings_ref.color_mid or defaults_ref.color_mid;
     B.color_mid[1] = cm[1] or 1; B.color_mid[2] = cm[2] or 1; B.color_mid[3] = cm[3] or 0;
-    local cc = settings_ref.color_close or { 1, 0, 0 };
+    local cc = settings_ref.color_close or defaults_ref.color_close;
     B.color_close[1] = cc[1] or 1; B.color_close[2] = cc[2] or 0; B.color_close[3] = cc[3] or 0;
 
     -- Migrate old height_overrides -> zoneline_overrides
@@ -192,8 +225,10 @@ local function sync_to_settings()
     settings_ref.d3d_text_max_scale = B.d3d_text_max_scale[1];
     settings_ref.d3d_show_labels    = B.d3d_show_labels[1];
     settings_ref.d3d_show_distance  = B.d3d_show_distance[1];
-    settings_ref.d3d_text_outline   = B.d3d_text_outline[1];
     settings_ref.d3d_dist_position  = DIST_POS_VALUES[B.d3d_dist_pos_idx[1] + 1] or 'bottom';
+    settings_ref.d3d_font_family    = font_values()[B.d3d_font_idx[1] + 1] or 'Arial';
+    settings_ref.d3d_outline_width  = B.d3d_outline_width[1];
+    settings_ref.d3d_bold           = B.d3d_bold[1];
     settings_ref.d3d_label_spacing  = B.d3d_label_spacing[1];
     settings_ref.dot_glow_enabled   = B.dot_glow_enabled[1];
     settings_ref.dot_glow_speed     = B.dot_glow_speed[1];
@@ -347,13 +382,6 @@ local function render_cat_labels()
     end
     tip('Show distance to zone line.');
 
-    c = imgui.Checkbox('Text Outline', B.d3d_text_outline);
-    if (c) then
-        changed = true;
-        renderer.d3d_text_outline = B.d3d_text_outline[1];
-    end
-    tip('Black outline around label text for readability.');
-
     if (B.d3d_show_distance[1]) then
         imgui.Spacing();
         sub_header('Distance Position');
@@ -375,7 +403,34 @@ local function render_cat_labels()
     end
 
     imgui.Spacing();
-    sub_header('Sizing');
+    sub_header('Fonts');
+
+    imgui.PushItemWidth(160);
+    if (imgui.Combo('Font##fontfamily', B.d3d_font_idx, font_names())) then
+        changed = true;
+        renderer.gdi_font_family = font_values()[B.d3d_font_idx[1] + 1] or 'Arial';
+        pcall(renderer.cleanup_gdi);
+    end
+    imgui.PopItemWidth();
+    tip('Label font family (clean text via GdiFonts).');
+
+    -- Bold sits to the right of the Font picker on the same line.
+    imgui.SameLine(0, 16);
+    c = imgui.Checkbox('Bold##font', B.d3d_bold);
+    if (c) then
+        changed = true;
+        renderer.gdi_bold = B.d3d_bold[1];
+        pcall(renderer.cleanup_gdi);
+    end
+    tip('Bold label text.');
+
+    c = imgui.SliderFloat('Outline', B.d3d_outline_width, 0, 5, '%.0f px');
+    if (c) then
+        changed = true;
+        renderer.gdi_outline_width = B.d3d_outline_width[1];
+        pcall(renderer.cleanup_gdi);
+    end
+    tip('Black outline thickness around label text.');
 
     c = imgui.SliderFloat('Font Size', B.d3d_text_scale, 0.3, 3.0, '%.1f');
     if (c) then
@@ -383,6 +438,9 @@ local function render_cat_labels()
         renderer.d3d_text_scale = B.d3d_text_scale[1];
     end
     tip('Base font size multiplier for labels.');
+
+    imgui.Spacing();
+    sub_header('Sizing');
 
     c = imgui.SliderFloat('Label Height', B.d3d_label_offset, 0.0, 5.0, '%.1f yalms');
     if (c) then
@@ -555,7 +613,6 @@ local function render_cat_overrides(zone_id)
     local has_entry = false;
 
     for _, zl in ipairs(zone_lines) do
-        -- Show any zone line with a valid rect_id and bounding box
         if (zl.rect_id ~= nil and zl.rect_id ~= 0
             and zl.sx ~= nil and zl.sx > 0 and zl.sz ~= nil and zl.sz > 0) then
 
@@ -563,7 +620,6 @@ local function render_cat_overrides(zone_id)
             local key = tostring(zl.rect_id);
             local is_circle = (zl.shape == 'circle');
 
-            -- Lazy-create buffers for this zone line
             -- Use rawget to avoid T{} sugar methods (e.g. .flatten is a T{} method)
             if (override_bufs[key] == nil) then
                 local existing = settings_ref.zoneline_overrides[key] or {};
@@ -672,7 +728,7 @@ function ui.render(zone_id, zone_name)
     end
 
     imgui.SetNextWindowSize({ 560, 480 }, ImGuiCond_FirstUseEver);
-    if (imgui.Begin('Zone Lines v1.2.3##zonelines', ui.is_open, ImGuiWindowFlags_None)) then
+    if (imgui.Begin('Zone Lines v1.3.0##zonelines', ui.is_open, ImGuiWindowFlags_None)) then
 
         -- Header: visibility toggle + zone info (always visible)
         local vis_changed = imgui.Checkbox('Show Markers', B.visible);
@@ -735,30 +791,32 @@ function ui.render(zone_id, zone_name)
         imgui.SameLine(content_w - reset_w);
         if (defaults_ref ~= nil) then
             if (imgui.Button('Reset to Defaults', { reset_w, 0 })) then
-                -- Deep copy defaults so we don't mutate the defaults table
+                -- Deep copy defaults so we don't mutate the defaults table.
+                -- Skip zoneline_overrides so the user's per-zone-line tweaks survive a reset.
                 for k, v in pairs(defaults_ref) do
-                    if (type(v) == 'table') then
-                        local copy = T{};
-                        for ik, iv in pairs(v) do
-                            if (type(iv) == 'table') then
-                                local inner = T{};
-                                for jk, jv in pairs(iv) do inner[jk] = jv; end
-                                copy[ik] = inner;
-                            else
-                                copy[ik] = iv;
+                    if (k ~= 'zoneline_overrides') then
+                        if (type(v) == 'table') then
+                            local copy = T{};
+                            for ik, iv in pairs(v) do
+                                if (type(iv) == 'table') then
+                                    local inner = T{};
+                                    for jk, jv in pairs(iv) do inner[jk] = jv; end
+                                    copy[ik] = inner;
+                                else
+                                    copy[ik] = iv;
+                                end
                             end
+                            settings_ref[k] = copy;
+                        else
+                            settings_ref[k] = v;
                         end
-                        settings_ref[k] = copy;
-                    else
-                        settings_ref[k] = v;
                     end
                 end
-                override_bufs = {};
                 sync_from_settings();
                 sync_renderer_fields();
                 ui.settings_dirty = true;
             end
-            tip('Reset all settings and overrides to defaults.');
+            tip('Reset all settings to defaults. Your per-zone-line overrides are kept.');
         end
     end
     imgui.End();
