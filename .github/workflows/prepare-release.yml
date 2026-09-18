@@ -136,7 +136,9 @@ jobs:
             } finally { Pop-Location }
           }
           $zip = New-AddonPackage $cfg -Files $files -Version $version -OutDir $env:OUT
-          Get-DownloadNotes $cfg -ZipName $zip -OutDir $env:OUT | Set-Content (Join-Path $env:OUT 'downloads.md')
+          $changes = Get-ChangelogLink $cfg -Version $version -Tag $env:TAG -Root src
+          if (-not $changes) { Write-Host "::notice::No changelog heading names version $version, so the notes get no What's new link." }
+          Get-DownloadNotes $cfg -ZipName $zip -OutDir $env:OUT -Changelog $changes | Set-Content (Join-Path $env:OUT 'downloads.md')
           Add-Content $env:GITHUB_OUTPUT "zip=$zip"
           Write-Summary "Packed $zip ($($files.Count) files) from $env:COMMIT."
 

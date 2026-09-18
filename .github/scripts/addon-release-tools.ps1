@@ -93,23 +93,64 @@ function New-AddonPackage {
     return $zipName
 }
 
-# The Downloads section added to a release's notes. Everything from the marker line down is generated and replaced
-# when the files are prepared again; the owner's notes go above it.
+# A link to this version's section of the changelog as it is at $Tag: the first heading below the title that names
+# the version, in CHANGELOG.md, else in README.md (a Version History section). $null when neither has one. The anchor
+# follows GitHub's heading ids (lower case, punctuation dropped, spaces to hyphens, -1/-2 for repeats).
+function Get-HeadingSlug {
+    param([string]$Text)
+    $t = $Text -replace '\[([^\]]*)\]\([^)]*\)', '$1'
+    $t = ($t -replace '[`*]', '').ToLowerInvariant()
+    $t = [regex]::Replace($t, '[^\p{L}\p{M}\p{N}\p{Pc} -]', '')
+    return $t.Replace(' ', '-')
+}
+function Get-ChangelogLink {
+    param($Cfg, [string]$Version, [string]$Tag, [string]$Root = '.')
+    $pattern = '(?<![\w.])v?' + [regex]::Escape($Version) + '(?![\w.])'
+    foreach ($file in 'CHANGELOG.md', 'README.md') {
+        $path = Join-Path $Root $file
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        $seen = @{}
+        $fence = $false
+        foreach ($line in Get-Content -LiteralPath $path) {
+            if ($line -match '^\s*(```|~~~)') { $fence = -not $fence; continue }
+            if ($fence -or $line -notmatch '^(#{1,6})\s+(.+?)\s*#*\s*$') { continue }
+            $level = $Matches[1].Length
+            $text = $Matches[2]
+            $slug = Get-HeadingSlug $text
+            $n = if ($seen.ContainsKey($slug)) { $seen[$slug] } else { 0 }
+            $seen[$slug] = $n + 1
+            if ($level -ge 2 -and $text -match $pattern) {
+                $anchor = if ($n -gt 0) { "$slug-$n" } else { $slug }
+                return "https://github.com/$($Cfg.repository)/blob/$Tag/$file#$anchor"
+            }
+        }
+    }
+    return $null
+}
+
+# The download footer added to a release's notes: a What's new link to the changelog (when it has a section for
+# this version), a rule, then a Note box with the Download line and the
+# verification details folded away. Everything from the marker line down is generated and replaced when the files are prepared again; the
+# owner's notes go above it.
 $script:NotesMarker = '<!-- release files: generated below this line -->'
 function Get-DownloadNotes {
-    param($Cfg, [string]$ZipName, [string]$OutDir)
-    $sums = Get-Content -LiteralPath (Join-Path $OutDir 'SHA256SUMS.txt')
-    $lines = @(
-        $script:NotesMarker,
-        '### Downloads',
+    param($Cfg, [string]$ZipName, [string]$OutDir, [string]$Changelog = '')
+    $hash = ((Get-Content -LiteralPath (Join-Path $OutDir 'SHA256SUMS.txt') | Select-Object -First 1) -split '\s+')[0]
+    $lines = @($script:NotesMarker, '')
+    if ($Changelog) { $lines += @("**What's new:** see the [changelog]($Changelog).", '') }
+    $lines += @(
+        '---',
         '',
-        "**$ZipName** - extract it into your Ashita folder: it adds ``addons\$($Cfg.addonFolder)\``. Then load it with ``/addon load $($Cfg.addonFolder)``.",
-        '',
-        "Packed by GitHub Actions from this release's source. Check the download:",
-        '```',
-        "gh attestation verify $ZipName --repo $($Cfg.repository)"
+        '> [!NOTE]',
+        "> **Download:** ``$ZipName`` - extract it into your Ashita folder (adds ``addons\$($Cfg.addonFolder)\``), then ``/addon load $($Cfg.addonFolder)``.",
+        '>',
+        '> <details><summary>Verify this download</summary>',
+        '>',
+        "> - SHA-256: ``$hash``",
+        "> - Attestation: ``gh attestation verify $ZipName --repo $($Cfg.repository)``",
+        '>',
+        '> </details>'
     )
-    $lines += @('```', '', 'SHA-256:', '```') + $sums + @('```')
     return ($lines -join "`n")
 }
 function Join-ReleaseNotes {
