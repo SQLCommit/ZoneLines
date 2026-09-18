@@ -1,6 +1,6 @@
 --[[
-    ZoneLines v1.3.0 - ImGui Settings & Status Window
-    Sidebar + detail panel layout matching MobHUD pattern.
+    ZoneLines v1.3.1 - ImGui Settings & Status Window
+    Sidebar + detail panel.
     Categories: Markers, Labels, Colors, Fade, Zone Lines, Overrides.
 ]]--
 
@@ -728,7 +728,7 @@ function ui.render(zone_id, zone_name)
     end
 
     imgui.SetNextWindowSize({ 560, 480 }, ImGuiCond_FirstUseEver);
-    if (imgui.Begin('Zone Lines v1.3.0##zonelines', ui.is_open, ImGuiWindowFlags_None)) then
+    if (imgui.Begin('Zone Lines v1.3.1##zonelines', ui.is_open, ImGuiWindowFlags_None)) then
 
         -- Header: visibility toggle + zone info (always visible)
         local vis_changed = imgui.Checkbox('Show Markers', B.visible);

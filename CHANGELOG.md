@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.3.1
+
+### Bug Fixes
+- **Fixed crash on repeated reload** - The GdiFonts font manager (a native object in the bundled texture DLL) is now destroyed on unload, where previously only the label-texture cache was freed. Reloading the addon several times in a row used to leak a font manager each time and could corrupt the DLL's heap, crashing the game; it is now torn down cleanly on every unload
+- **Font cleanup always runs on unload** - The unload steps are guarded one by one, so the font manager teardown above still runs if saving the window's settings fails
+- **An error no longer unloads the whole addon** - If drawing the markers or the settings window ever fails, only that part stops, one chat message says so (with `/addon reload zonelines` to restart it), and the rest keeps working. Before, Ashita unloaded the addon silently
+
 ## v1.3.0
 
 ### Clean Label Text (GdiFonts)
@@ -15,6 +22,9 @@
 ### Performance
 - **Curtain position cache** - Per-zone-line dot positions (terrain interpolation, 3-pass smoothing, gradient flattening, and table allocations) are now cached and reused across frames, recomputing only when settings change or the player crosses a zone line. In busy areas with many visible zone lines this removes nearly all of the per-frame work from the heaviest rendering path
 
+### UI
+- **Reorganized Labels settings** - Split the Labels tab into separate **Fonts** (font family, bold, outline thickness, font size) and **Sizing** (label height, min/max zoom) sections for clearer grouping
+
 ### Bug Fixes
 - **Fixed COM texture reference leak** - The D3D8 state save called `GetTexture` without releasing the returned (AddRef'd) reference, slowly accumulating VRAM across zone changes over a long session. The reference is now released each frame
 - **Fixed alpha-test state leak** - `ALPHAREF` / `ALPHAFUNC` set during the label pass are now saved and restored, so they no longer leak into the game's world rendering (foliage, fence, and hair alpha cutouts)
@@ -22,6 +32,7 @@
 - **Case-insensitive commands** - `/ZL` and other mixed-case spellings now work
 
 ### Internals
+- **Comment cleanup** - Trimmed verbose/redundant comments across the codebase while keeping the why/gotcha notes
 - **Single source of truth for defaults** - Collapsed several divergent copies of the default values into one `default_settings` table that every sync path and UI buffer reads from
 - **Reliable `/addon reload`** - The entry script clears the `package.loaded` cache for its submodules so reloads pick up edits to them
 - **Removed dead "Text Outline" setting** - Replaced by the outline-thickness slider; the orphaned key is stripped from saved settings on load

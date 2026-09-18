@@ -1,5 +1,5 @@
 --[[
-    ZoneLines v1.3.0 - Zone Line Rendering via D3D8
+    ZoneLines v1.3.1 - Zone Line Rendering via D3D8
 
     Zone line bounding boxes have a thin dimension (depth you walk through)
     and a wide dimension (spanning the passage). The dotted line is drawn
@@ -928,6 +928,16 @@ function renderer.cleanup_gdi()
         pcall(function() gdi:destroy_object(e.obj); end);
         gdi_cache[k] = nil;
     end
+end
+-- Full teardown for UNLOAD ONLY. Destroys the native GdiFonts FontManager so a
+-- fresh /addon load doesn't leak one. The module re-runs CreateFontManager on each
+-- load (fresh Lua state); without this, rapid reloads accumulate FontManagers in the
+-- persistent DLL and corrupt its heap (STATUS_HEAP_CORRUPTION, c0000374).
+function renderer.shutdown_gdi()
+    if (gdi == nil) then return; end
+    renderer.cleanup_gdi();
+    pcall(function() gdi:destroy_interface(); end);
+    gdi = nil;
 end
 
 -- Draw one gdifonts texture as a depth-tested screen quad (pixel-snapped).

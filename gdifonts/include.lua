@@ -114,8 +114,13 @@ exports.Gradient = {
 
 function exports:create_object(settings, manual)
     if (interface == nil) then
-        error('Interface doesn\'t exist.');
-        return;
+        -- re-acquire after a destroy_interface: the old code left `interface` dangling on destroy,
+        -- so this guard was false and a freed FontManager reached fontobject:new -> use-after-free.
+        interface = renderer.CreateFontManager(d3d.get_device());
+        if (interface == nil) then
+            error('Interface doesn\'t exist.');
+            return;
+        end
     end
 
     local obj = fontobject:new(renderer, interface, settings);
@@ -130,7 +135,10 @@ function exports:destroy_interface()
         object:destroy();
     end
     objects = T{};
-    renderer.DestroyFontManager(interface);
+    if (interface ~= nil) then
+        renderer.DestroyFontManager(interface);
+        interface = nil;   -- so create_object re-acquires instead of using a freed pointer
+    end
 end
 
 function exports:destroy_object(fontObject)

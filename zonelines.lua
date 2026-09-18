@@ -1,5 +1,5 @@
 --[[
-    ZoneLines v1.3.0 - Zone Line Visualizer for Ashita v4
+    ZoneLines v1.3.1 - Zone Line Visualizer for Ashita v4
 
     Draws ground markers at zone line positions to help players see
     invisible zone transition boundaries. Zone lines are pre-extracted
@@ -13,12 +13,12 @@
         /zl help         - Show command help
 
     Author: SQLCommit
-    Version: 1.3.0
+    Version: 1.3.1
 ]]--
 
 addon.name    = 'zonelines';
 addon.author  = 'SQLCommit';
-addon.version = '1.3.0';
+addon.version = '1.3.1';
 addon.desc    = 'Visualizes zone line boundaries with ground markers.';
 addon.link    = 'https://github.com/SQLCommit/zonelines';
 
@@ -29,9 +29,7 @@ local d3d8     = require 'd3d8';
 local settings = require 'settings';
 
 -- Drop our own submodules from the require cache so '/addon reload' actually
--- re-reads edits to them. Ashita keeps require()'d modules in package.loaded
--- across reloads, so without this a reload re-runs only this entry script and
--- keeps the stale cached data/renderer/ui (edits appear to "not take").
+-- re-reads edits to them.
 package.loaded['data']     = nil;
 package.loaded['renderer'] = nil;
 package.loaded['ui']       = nil;
@@ -220,9 +218,9 @@ end);
 -- Event: Unload
 -------------------------------------------------------------------------------
 ashita.events.register('unload', 'zonelines_unload', function()
-    ui.sync_settings();
+    pcall(ui.sync_settings);        -- guarded, so the FontManager teardown below always runs
     pcall(settings.save);
-    pcall(renderer.cleanup_gdi);   -- release gdifonts label textures
+    pcall(renderer.shutdown_gdi);   -- destroy the native FontManager (not just textures)
 end);
 
 -------------------------------------------------------------------------------
@@ -325,9 +323,18 @@ end);
 -- Draws markers as 3D primitives on pass 2 (before game renders world).
 -- Game geometry naturally occludes our markers via the depth buffer.
 -------------------------------------------------------------------------------
-ashita.events.register('d3d_beginscene', 'zonelines_beginscene', function()
-    renderer.d3d_pass = renderer.d3d_pass + 1;
-    if (renderer.d3d_pass ~= 2) then return; end
+-- An error in a per-frame handler would make Ashita unload the whole addon. Instead the part that failed stops
+-- (so a half-drawn frame does not repeat every frame), the player is told once, and the rest keeps running.
+local stopped = { markers = false, window = false };
+local function stop_part(part, what, err)
+    if (stopped[part]) then return; end
+    stopped[part] = true;
+    print(chat.header(addon.name):append(chat.error(what .. ' stopped after an error (' .. tostring(err) .. ').'))
+        :append(chat.message(' Use ')):append(chat.success('/addon reload zonelines'))
+        :append(chat.message(' to restart it.')));
+end
+
+local function draw_markers()
     if (not renderer.hide_behind_walls) then return; end
     if (s == nil or not s.visible) then return; end
     if (zoning) then return; end
@@ -340,6 +347,13 @@ ashita.events.register('d3d_beginscene', 'zonelines_beginscene', function()
 
     local zone_lines = data.get_zone_lines(zid);
     renderer.draw_d3d(zone_lines, px, py, pz, s);
+end
+
+ashita.events.register('d3d_beginscene', 'zonelines_beginscene', function()
+    renderer.d3d_pass = renderer.d3d_pass + 1;
+    if (renderer.d3d_pass ~= 2 or stopped.markers) then return; end
+    local ok, err = pcall(draw_markers);
+    if (not ok) then stop_part('markers', 'Zone line markers', err); end
 end);
 
 -------------------------------------------------------------------------------
@@ -347,32 +361,30 @@ end);
 -- Draws text labels and the settings window.
 -- Also caches view matrix and resets pass counter for next frame.
 -------------------------------------------------------------------------------
-ashita.events.register('d3d_present', 'zonelines_present', function()
-    renderer.d3d_pass = 0;
-
-    -- Cache view matrix for billboard orientation in next frame's beginscene
-    if (s ~= nil and renderer.hide_behind_walls and s.visible) then
-        local dev = d3d8.get_device();
-        if (dev ~= nil) then
-            local _, v = dev:GetTransform(2);  -- D3DTS_VIEW
-            if (v ~= nil) then
-                local ok, tbl = pcall(renderer.copy_matrix, v);
-                if (ok and type(tbl._11) == 'number') then renderer.cached_view = tbl; end
-            end
-            local _, p = dev:GetTransform(3);  -- D3DTS_PROJECTION
-            if (p ~= nil) then
-                local ok, tbl = pcall(renderer.copy_matrix, p);
-                if (ok and type(tbl._11) == 'number') then renderer.cached_proj = tbl; end
-            end
-            local _, vp = dev:GetViewport();
-            if (vp ~= nil) then
-                renderer.cached_vp_w = vp.Width;
-                renderer.cached_vp_h = vp.Height;
-            end
-        end
-
+-- The camera for the next frame's markers: view and projection matrices and the viewport.
+local function cache_view()
+    if (s == nil or not renderer.hide_behind_walls or not s.visible) then return; end
+    local dev = d3d8.get_device();
+    if (dev == nil) then return; end
+    local _, v = dev:GetTransform(2);  -- D3DTS_VIEW
+    if (v ~= nil) then
+        local ok, tbl = pcall(renderer.copy_matrix, v);
+        if (ok and type(tbl._11) == 'number') then renderer.cached_view = tbl; end
     end
+    local _, p = dev:GetTransform(3);  -- D3DTS_PROJECTION
+    if (p ~= nil) then
+        local ok, tbl = pcall(renderer.copy_matrix, p);
+        if (ok and type(tbl._11) == 'number') then renderer.cached_proj = tbl; end
+    end
+    local _, vp = dev:GetViewport();
+    if (vp ~= nil) then
+        renderer.cached_vp_w = vp.Width;
+        renderer.cached_vp_h = vp.Height;
+    end
+end
 
+-- Zone tracking, saving changed settings, and the settings window.
+local function update_window()
     -- Character login gate
     local zid = get_zone_id();
     if (zid == nil or zid <= 0) then return; end
@@ -392,6 +404,17 @@ ashita.events.register('d3d_present', 'zonelines_present', function()
     end
 
     ui.render(current_zone, zone_name);
+end
+
+ashita.events.register('d3d_present', 'zonelines_present', function()
+    renderer.d3d_pass = 0;
+    if (not stopped.markers) then
+        local ok, err = pcall(cache_view);
+        if (not ok) then stop_part('markers', 'Zone line markers', err); end
+    end
+    if (stopped.window) then return; end
+    local ok, err = pcall(update_window);
+    if (not ok) then stop_part('window', 'The Zone Lines window', err); end
 end);
 
 -------------------------------------------------------------------------------

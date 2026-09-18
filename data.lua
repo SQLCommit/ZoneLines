@@ -1,5 +1,5 @@
 --[[
-    ZoneLines v1.3.0 - Data Layer
+    ZoneLines v1.3.1 - Data Layer
     Loads pre-extracted zone line bounding boxes from zones_data.lua,
     supplemental trigger-area transitions from supplemental_zones.lua,
     and pre-computed terrain heights from terrain_heights.lua.
@@ -29,8 +29,7 @@ local skip_entries = {
 -- Pre-computed terrain heights (loaded from terrain_heights.lua)
 data.terrain_data = nil;
 
--- Runtime zone name cache: resolved from FFXI client resource strings
--- The extraction script's hardcoded names are unreliable; always prefer the client.
+-- Runtime zone name cache: resolved from FFXI client resource strings.
 local zone_name_cache = {};
 
 -- Cache dirty flag: invalidated on any mutation
@@ -180,7 +179,6 @@ function data.get_zone_lines(zone_id)
 
         for ei, entry in ipairs(data.static_data[zone_id]) do
             -- Resolve destination name at runtime from FFXI client resources
-            -- (the extraction script's hardcoded names are unreliable)
             local dest_name = '';
             if (entry.to_zone ~= nil and entry.to_zone >= 0) then
                 dest_name = resolve_zone_name(entry.to_zone);
@@ -200,10 +198,6 @@ function data.get_zone_lines(zone_id)
             end
 
             -- Synthesize flat terrain for entries missing navmesh data.
-            -- Ground level in FFXI zone line boxes sits ~2 yalms above the
-            -- box floor: wy + sy/2 - 2. This formula matches real terrain
-            -- within 0.1 yalms across tested zones (verified vs East Ronfaure,
-            -- Jugner Forest entries with actual navmesh data).
             if (heights == nil and entry.sx ~= nil and entry.sz ~= nil) then
                 local wall_len = math.max(entry.sx, entry.sz);
                 local num_samples = math.max(2, math.floor(wall_len / 2.0) + 1);

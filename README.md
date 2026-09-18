@@ -1,4 +1,4 @@
-# ZoneLines v1.3.0 - Zone Line Visualizer for Ashita v4.3
+# ZoneLines v1.3.1 - Zone Line Visualizer for Ashita v4.3
 
 Zone line visualizer for Ashita v4.3. Draws 3D ground markers at zone transition boundaries so you can see where zone lines are before walking into them. All zone line data is pre-extracted from FFXI DAT files.
 
@@ -27,8 +27,9 @@ Zone line visualizer for Ashita v4.3. Draws 3D ground markers at zone transition
 
 ## Installation
 
-1. Copy the `zonelines` folder to your Ashita `addons` directory
-2. Load with `/addon load zonelines`
+1. Download `ZoneLines-vX.Y.Z.zip` from the [Releases](https://github.com/SQLCommit/ZoneLines/releases/latest) page
+2. Extract it into your Ashita folder - it adds `addons\zonelines\`
+3. Load with `/addon load zonelines`
 
 ## Commands
 
@@ -48,16 +49,6 @@ Zone line visualizer for Ashita v4.3. Draws 3D ground markers at zone transition
 2. **supplemental_zones.lua** - Hand-added trigger-area transitions
 3. **terrain_heights.lua** - Pre-computed ground heights from navmesh data
 
-### Data Extraction
-
-The addon's data files are pre-generated offline — no extraction happens at runtime.
-
-**Zone Lines (zones_data.lua)** - Extracted from FFXI's DAT files using a Python script. Each zone has a DAT containing RID (Room ID) entries with a `z` prefix identifier (e.g., `z020`, `z05a`). The script scans the VTABLE/FTABLE to locate each zone's DAT, parses the RID entries to find zone line bounding boxes (position, size, rotation), and decodes the 4-character FourCC identifier using base-36 encoding to determine the destination zone ID. Mog House entrances also exist in the DATs using `zm` prefix identifiers (e.g., `zmrw`, `zms0`) with `to_zone=0`. The result is 846 oriented bounding boxes across 198 zones with positions, dimensions, rotation angles, and destination zone IDs.
-
-**Terrain Heights (terrain_heights.lua)** - Extracted from LandSandBoat's Detour navmesh `.nav` files. A Python script reads the navmesh polygon data for each zone, then for each zone line bounding box, samples ground heights at evenly-spaced dot positions along the line. It uses point-in-polygon ray casting to find which navmesh triangle each point falls on, then barycentric interpolation to compute the exact ground height. Edge-first sampling with cross-fill fallback handles cases where dot positions fall slightly outside the navmesh. Post-processing applies slope outlier clamping and edge extension to smooth out gaps.
-
-**Supplemental Triggers (supplemental_zones.lua)** - Hand-added from LandSandBoat server scripts. A few zone transitions use trigger areas instead of standard walk-through boundaries, so they don't have RID entries in the DAT files. Currently covers the Northern San d'Oria bridge entrance to Chateau d'Oraguille and the Heaven's Tower portal in Windurst Walls. Positions and extents are sourced from LSB's `Zone.lua` trigger area definitions.
-
 ### Rendering
 
 Zone lines are rendered as 3D primitives using D3D8 `DrawPrimitiveUP` in the `d3d_beginscene` event (pass 2, before game world geometry). The game's depth buffer naturally occludes markers behind walls and terrain. Text labels are rendered to per-string textures via GdiFonts (GDI+) and drawn as depth-tested billboard quads in the same pass, so they render cleanly at any zoom while remaining occluded by world geometry.
@@ -65,50 +56,6 @@ Zone lines are rendered as 3D primitives using D3D8 `DrawPrimitiveUP` in the `d3
 Marker drawing keys off the *second* `BeginScene` of each frame; if the client ever issued a single `BeginScene` for a frame, markers simply wouldn't draw that frame (it fails safe rather than misdrawing).
 
 For passage-type zone lines, hovering dots are drawn along the wider dimension of the oriented bounding box, interpolating pre-computed terrain heights. Circle markers are used for portals and area triggers, with a vertical pole connecting the ground circle to the label above.
-
-### Ashita SDK API
-
-| Interface | Methods Used | Purpose |
-|-----------|-------------|---------|
-| **IEntity** | `GetLocalPositionX/Y/Z(idx)` | Player position for distance calculation and camera reference |
-| **IParty** | `GetMemberZone(0)` | Zone detection, character login gate |
-| **IResourceManager** | `GetString('zones.names', id)` | Destination zone name resolution |
-| **GetPlayerEntity()** | `.ServerId` | Character identity for per-character settings |
-| **AshitaCore** | `GetInstallPath()`, `GetMemoryManager()`, `GetResourceManager()` | File paths, access to memory interfaces |
-| **D3D8 Device** | `DrawPrimitiveUP`, `SetRenderState`, `SetTransform` | World-space 3D marker rendering with depth testing |
-| **ImGui** | window / widgets | Settings window UI |
-| **GdiFonts** (by thorny) | `create_object`, `get_texture` | Clean label text rendered to D3D textures |
-
-## Settings
-
-Settings are saved per-character via Ashita's settings library. The settings window uses a sidebar + detail panel layout with 6 categories. A visibility toggle and zone info header are always visible at the top.
-
-### Markers
-- **Dot Size / Spacing / Hover Height / Cliff Flatten** - Shape controls for dot geometry
-- **Glow Pulse** - Enable pulsating dot halos with speed, min/max brightness, and intensity
-- **Edge Glow** - Dot edge softness (0 = sharp, 1 = solid fill)
-
-### Labels
-- **Labels / Distance** - Show/hide destination names and distance in yalms
-- **Font / Bold** - Label font family (common Windows fonts + any you add to `fonts/`) with a bold toggle
-- **Outline** - Black outline thickness around label text for readability
-- **Distance Position** - Place distance text top/bottom/left/right of zone name
-- **Label Gap** - Spacing between zone name and distance text
-- **Font Size / Label Height / Min Zoom / Max Zoom** - Text sizing controls
-
-### Colors
-- **Dot Color** - Base color for all dots
-- **Distance Colors** - Toggle proximity-based coloring with far/mid/close pickers
-
-### Fade
-- **Render Distance** - Max distance to render zone line markers
-- **Distance Fade** - Shrink dots near the render distance edge with configurable fade zone
-
-### Zone Lines
-- Table of all zone lines in the current zone with destination, position, size, and source
-
-### Overrides
-- **Per-zone-line adjustments** - Hide, height, trim, cliff flatten, and pole height per entry
 
 ## Fonts
 
@@ -137,20 +84,6 @@ zonelines/
   gdifonts/              -- GdiFonts library (clean label text via GDI+; by thorny)
   fonts/                 -- Optional bundled label fonts + install instructions
 ```
-
-## Technical Notes
-
-### Performance
-- **Pre-computed data**: All zone line positions and terrain heights are loaded once at startup, not computed per-frame
-- **Zone caching**: Zone line data is cached per zone with a dirty flag, only recomputed on zone change or settings mutation
-- **Pre-allocated D3D matrices**: Identity and ortho matrices are allocated once at module level, not per-frame
-- **Reusable label table**: Label collection uses a counter pattern with table reuse to avoid per-frame allocations
-- **Cached curtain positions**: Per-zone-line dot positions (terrain interpolation, smoothing, gradient flattening) are cached and reused across frames, recomputing only when settings change or the player crosses a zone line - eliminating per-frame recomputation and table allocations from the heaviest rendering path
-- **Settings gating**: Color rebuilds and setting syncs only run when settings change, not every frame
-- **D3D state skip**: Render state save/restore cycle is skipped entirely when no zone lines are within render distance (pre-check padded by box size to avoid false culls)
-- **Edge-based culling**: Per-zone-line visibility uses nearest box edge distance, matching the fade math so wide zone lines fade correctly at the boundary
-- **Transform safety**: D3D transform matrices are saved as Lua table copies to prevent cdata staleness when restoring
-- **Throttled error logging**: Error messages are rate-limited (30s per error type) to avoid chat spam while ensuring issues are always reported
 
 ## Version History
 
