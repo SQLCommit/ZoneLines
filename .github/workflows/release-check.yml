@@ -1,0 +1,30 @@
+# Release check. Runs when a release is published and fails (GitHub emails you) if its files are missing - that is,
+# if it was published before Prepare release attached them.
+name: Release check
+run-name: Release check ${{ github.event.release.tag_name }}
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the release files
+        shell: pwsh
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          ASSETS: ${{ toJSON(github.event.release.assets) }}
+        run: |
+          $names = @(($env:ASSETS | ConvertFrom-Json) | ForEach-Object { $_.name })
+          $zip = @($names | Where-Object { $_ -like '*.zip' })
+          if (-not $zip -or $names -notcontains 'SHA256SUMS.txt') {
+            $text = "$env:TAG was published without its files (found: $(if ($names) { $names -join ', ' } else { 'none' })). Run Prepare release with this tag: it adds the files to a published release that has none. If the release is immutable and cannot take files, publish the next version the right way instead."
+            Add-Content $env:GITHUB_STEP_SUMMARY $text
+            throw $text
+          }
+          Add-Content $env:GITHUB_STEP_SUMMARY "$env:TAG has $($zip -join ', ') and SHA256SUMS.txt."

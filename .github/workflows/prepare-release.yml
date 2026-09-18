@@ -1,0 +1,215 @@
+# Prepare release. Run it by hand (Actions > Prepare release > Run workflow) after saving a DRAFT release on GitHub
+# whose tag is the version the addon reports (for example v1.3.1). (Saving a draft cannot start it: GitHub does not
+# run workflows for draft releases.) It checks that every Lua file compiles, packs the addon as
+# <Name>-v<version>.zip holding addons/<folder>/ so it extracts straight into an Ashita folder, and attaches the zip and
+# its SHA-256 sum to the draft with a Downloads section under your notes, plus an attestation. Check the draft, then
+# publish it yourself.
+# It also works on a release that is already published but has no files yet (releases made before this workflow
+# existed), as long as release immutability does not block adding files to it.
+name: Prepare release
+run-name: Prepare release ${{ inputs.tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag of the release (for example v1.3.1)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: addon-release
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag }}
+
+jobs:
+  # Drafts are visible only with write access, so the lookup runs here, in a job that executes no addon code.
+  find:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      commit: ${{ steps.release.outputs.commit }}
+      draft: ${{ steps.release.outputs.draft }}
+    steps:
+      - name: Find the release
+        id: release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $info = gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json isDraft,targetCommitish,assets,body 2>&1
+          if ($LASTEXITCODE) { throw "No release with tag $env:TAG was found. Save a draft release with that tag first. ($info)" }
+          $release = ($info -join "`n") | ConvertFrom-Json
+          $names = @($release.assets | ForEach-Object { $_.name })
+          $zips = @($names | Where-Object { $_ -like '*.zip' })
+          $tagSha = gh api "repos/$env:GITHUB_REPOSITORY/commits/tags/$env:TAG" --jq .sha 2>$null
+          $tagFound = -not $LASTEXITCODE
+          if ($release.isDraft) {
+            if ($tagFound) {
+              $commit = $tagSha
+              Write-Host "The tag $env:TAG already exists; packing it ($commit)."
+            } else {
+              $target = $release.targetCommitish
+              if ($target -match '^[0-9a-f]{40}$') {
+                # An earlier run pinned the draft to the commit it packed. Pack the default branch's newest commit
+                # instead, so a fix pushed since that run is in the zip and in the tag.
+                $branch = gh api "repos/$env:GITHUB_REPOSITORY" --jq .default_branch
+                if ($LASTEXITCODE) { throw 'Could not read the default branch.' }
+                $commit = gh api "repos/$env:GITHUB_REPOSITORY/commits/$branch" --jq .sha
+                if ($LASTEXITCODE) { throw "Could not find $branch." }
+                if ("$commit".Trim() -ne $target) { Write-Host "The draft was last prepared from $target; $branch has moved on, so packing $("$commit".Trim())." }
+              } else {
+                $commit = gh api "repos/$env:GITHUB_REPOSITORY/commits/$target" --jq .sha
+                if ($LASTEXITCODE) { throw "Could not find the draft's target $target." }
+              }
+              Write-Host "Packing $("$commit".Trim()); the tag $env:TAG will be created there when you publish."
+            }
+            $draft = 'true'
+          } else {
+            $complete = $zips -and ($names -contains 'SHA256SUMS.txt') -and "$($release.body)".Contains('<!-- release files: generated below this line -->')
+            if ($complete) { throw "$env:TAG is already published with its files ($($zips -join ', ') and SHA256SUMS.txt). Publish a new version for new files." }
+            if ($zips) { Write-Host "$env:TAG has $($zips -join ', ') but not all of its files; preparing them again." }
+            if (-not $tagFound) { throw "$env:TAG is published but its tag was not found." }
+            $commit = $tagSha
+            $draft = 'false'
+            if (-not $zips) { Write-Host "$env:TAG is published without files; packing its tag ($commit) and adding them." }
+          }
+          Add-Content $env:GITHUB_OUTPUT "commit=$("$commit".Trim())"
+          Add-Content $env:GITHUB_OUTPUT "draft=$draft"
+
+  build:
+    needs: find
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      zip: ${{ steps.package.outputs.zip }}
+    steps:
+      # The release tools and release.json come from the branch the workflow runs on, so a release made before they
+      # were added can still be packed; the addon itself comes from the release's commit.
+      - name: Get the release tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            /.github/
+          sparse-checkout-cone-mode: false
+          fetch-depth: 1
+          path: ci
+          persist-credentials: false
+
+      - name: Check out the release's source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.find.outputs.commit }}
+          path: src
+          persist-credentials: false
+
+      - name: Install LuaJIT
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends luajit
+
+      - name: Check and pack
+        id: package
+        shell: pwsh
+        env:
+          OUT: ${{ runner.temp }}/release-files
+          COMMIT: ${{ needs.find.outputs.commit }}
+        run: |
+          . ./ci/.github/scripts/addon-release-tools.ps1
+          $cfg = Get-ReleaseConfig -Root ci
+          $version = Get-AddonVersion $cfg -Source src
+          if ("v$version" -ne $env:TAG) { throw "The tag is $env:TAG, but the addon reports version $version ($($cfg.versionFile)). Use the tag v$version." }
+          $files = Get-PackageFiles $cfg -Source src
+          $lua = @($files | Where-Object { $_[0] -like '*.lua' } | ForEach-Object { $_[0] })
+          & luajit ci/.github/scripts/syntax-check.lua @lua
+          if ($LASTEXITCODE) { throw 'A Lua file does not compile (listed above); nothing was packed.' }
+          if (($cfg.PSObject.Properties.Name -contains 'test') -and $cfg.test) {
+            Push-Location src
+            try {
+              & bash -c $cfg.test
+              if ($LASTEXITCODE) { throw "The tests failed ($($cfg.test))." }
+            } finally { Pop-Location }
+          }
+          $zip = New-AddonPackage $cfg -Files $files -Version $version -OutDir $env:OUT
+          Get-DownloadNotes $cfg -ZipName $zip -OutDir $env:OUT | Set-Content (Join-Path $env:OUT 'downloads.md')
+          Add-Content $env:GITHUB_OUTPUT "zip=$zip"
+          Write-Summary "Packed $zip ($($files.Count) files) from $env:COMMIT."
+
+      - name: Keep the files for the publish job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-files
+          path: ${{ runner.temp }}/release-files
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [find, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Get the release tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            /.github/scripts/
+          sparse-checkout-cone-mode: false
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Get the packed files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-files
+          path: ${{ runner.temp }}/release-files
+
+      - name: Attest the zip
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/release-files/*.zip
+
+      - name: Attach the files to the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ needs.find.outputs.commit }}
+          DRAFT: ${{ needs.find.outputs.draft }}
+          ZIP: ${{ needs.build.outputs.zip }}
+          FILES: ${{ runner.temp }}/release-files
+        run: |
+          . ./.github/scripts/addon-release-tools.ps1
+          $isDraft = $env:DRAFT -eq 'true'
+          $release = (Invoke-Gh @('release', 'view', $env:TAG, '--repo', $env:GITHUB_REPOSITORY, '--json', 'isDraft,body,assets')) | ConvertFrom-Json
+          if ($isDraft -and -not $release.isDraft) { throw "$env:TAG was published while it was being packed; nothing was attached." }
+          $files = @((Join-Path $env:FILES $env:ZIP), (Join-Path $env:FILES 'SHA256SUMS.txt'))
+          try {
+            Invoke-Gh (@('release', 'upload', $env:TAG, '--repo', $env:GITHUB_REPOSITORY, '--clobber') + $files) | Out-Null
+          } catch {
+            if ($isDraft) { throw }
+            throw "Could not add files to the published release ${env:TAG}: $_ If the release is immutable (an immutable release cannot take files once published), publish a new version instead."
+          }
+          $notes = Join-ReleaseNotes -Body $release.body -Downloads ((Get-Content (Join-Path $env:FILES 'downloads.md')) -join "`n")
+          $notesFile = Join-Path $env:RUNNER_TEMP 'notes.md'
+          Set-Content -LiteralPath $notesFile -Value $notes
+          $edit = @('release', 'edit', $env:TAG, '--repo', $env:GITHUB_REPOSITORY, '--notes-file', $notesFile)
+          if ($isDraft) { $edit += @('--target', $env:COMMIT) }
+          Invoke-Gh $edit | Out-Null
+          $after = (Invoke-Gh @('release', 'view', $env:TAG, '--repo', $env:GITHUB_REPOSITORY, '--json', 'assets')) | ConvertFrom-Json
+          $names = @($after.assets | ForEach-Object { $_.name })
+          foreach ($want in @($env:ZIP, 'SHA256SUMS.txt')) { if ($names -notcontains $want) { throw "$want is missing from the release after uploading." } }
+          $extra = @($names | Where-Object { @($env:ZIP, 'SHA256SUMS.txt') -notcontains $_ })
+          if ($extra) { Write-Host "::warning::The release also has: $($extra -join ', '). Remove them if they are not meant to ship." }
+          if ($isDraft) {
+            Write-Summary "Draft $env:TAG is ready: $env:ZIP and SHA256SUMS.txt are attached and the tag will point at $env:COMMIT. Check it, then publish it."
+          } else {
+            Write-Summary "$env:ZIP and SHA256SUMS.txt were added to the published release $env:TAG."
+          }

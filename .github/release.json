@@ -1,0 +1,17 @@
+{
+  "name": "ZoneLines",
+  "repository": "SQLCommit/ZoneLines",
+  "addonFolder": "zonelines",
+  "versionFile": "zonelines.lua",
+  "versionPattern": "(?m)^\\s*addon\\.version\\s*=\\s*'([0-9]+(?:\\.[0-9]+){1,2})'",
+  "exclude": [
+    "tests",
+    "tools",
+    "TestIcons",
+    "*.bak",
+    "*.log",
+    "*.tmp",
+    "*.db-wal",
+    "*.db-shm"
+  ]
+}
