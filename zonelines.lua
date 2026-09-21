@@ -1,20 +1,5 @@
---[[
-    ZoneLines v1.3.1 - Zone Line Visualizer for Ashita v4
-
-    Draws ground markers at zone line positions to help players see
-    invisible zone transition boundaries. Zone lines are pre-extracted
-    from FFXI DAT files.
-
-    Commands:
-        /zl              - Toggle the settings window
-        /zl show | hide  - Show or hide markers
-        /zl list         - Print zone lines for current zone
-        /zl resetui      - Reset window size and position
-        /zl help         - Show command help
-
-    Author: SQLCommit
-    Version: 1.3.1
-]]--
+-- ZoneLines: terrain-aware markers for zone transition boundaries.
+-- Author: SQLCommit
 
 addon.name    = 'zonelines';
 addon.author  = 'SQLCommit';
@@ -28,8 +13,7 @@ local chat     = require 'chat';
 local d3d8     = require 'd3d8';
 local settings = require 'settings';
 
--- Drop our own submodules from the require cache so '/addon reload' actually
--- re-reads edits to them.
+-- Reload addon modules when the entry script reloads.
 package.loaded['data']     = nil;
 package.loaded['renderer'] = nil;
 package.loaded['ui']       = nil;
@@ -38,9 +22,7 @@ local data     = require 'data';
 local renderer = require 'renderer';
 local ui       = require 'ui';
 
--------------------------------------------------------------------------------
 -- Default Settings (saved per-character via Ashita settings)
--------------------------------------------------------------------------------
 local default_settings = T{
     visible          = true,
     render_distance  = 90.0,
@@ -93,17 +75,13 @@ local default_settings = T{
     },
 };
 
--------------------------------------------------------------------------------
 -- State
--------------------------------------------------------------------------------
 local s = nil;           -- settings reference
 local current_zone = 0;
 local zone_name = '';
 local zoning = false;    -- true during zone transition (suppresses rendering)
 
--------------------------------------------------------------------------------
 -- Helpers
--------------------------------------------------------------------------------
 
 local function msg(text)
     print(chat.header(addon.name):append(chat.message(text)));
@@ -135,18 +113,13 @@ end
 local function get_player_pos()
     local entity = GetPlayerEntity();
     if (entity == nil) then return nil; end
-    -- Entity position_t field order is X, Z, Y in memory:
-    --   .X = east/west,  .Z = elevation,  .Y = north/south
-    -- DAT data uses: x=east/west, y=elevation, z=north/south
-    -- Return in DAT order so coordinates align for distance + projection.
+    -- Entity fields are X=east/west, Z=elevation, Y=north/south; return DAT order (X,Z,Y).
     return entity.Movement.LocalPosition.X,
            entity.Movement.LocalPosition.Z,
            entity.Movement.LocalPosition.Y;
 end
 
--------------------------------------------------------------------------------
 -- Help
--------------------------------------------------------------------------------
 local function print_help()
     print(chat.header(addon.name):append(chat.message('Available commands:')));
     local cmds = T{
@@ -161,9 +134,7 @@ local function print_help()
     end);
 end
 
--------------------------------------------------------------------------------
 -- Sync settings to renderer fields
--------------------------------------------------------------------------------
 local function sync_renderer(settings_ref)
     renderer.d3d_text_scale     = settings_ref.d3d_text_scale or default_settings.d3d_text_scale;
     renderer.d3d_label_offset   = settings_ref.d3d_label_offset or default_settings.d3d_label_offset;
@@ -183,9 +154,7 @@ local function sync_renderer(settings_ref)
     renderer.dot_glow_max       = settings_ref.dot_glow_max or default_settings.dot_glow_max;
 end
 
--------------------------------------------------------------------------------
 -- Event: Load
--------------------------------------------------------------------------------
 ashita.events.register('load', 'zonelines_load', function()
     s = settings.load(default_settings);
 
@@ -200,7 +169,7 @@ ashita.events.register('load', 'zonelines_load', function()
     pcall(renderer.scan_fonts);   -- list common + installed bundled fonts (addons/zonelines/fonts/)
     sync_renderer(s);
 
-    -- Initialize data layer (loads zone line data from DAT files)
+    -- Load pre-extracted zone and terrain data.
     local config_path = AshitaCore:GetInstallPath() .. '\\config\\addons\\zonelines';
     data.init(config_path);
 
@@ -214,18 +183,14 @@ ashita.events.register('load', 'zonelines_load', function()
         :append(chat.message(' to toggle window.')));
 end);
 
--------------------------------------------------------------------------------
 -- Event: Unload
--------------------------------------------------------------------------------
 ashita.events.register('unload', 'zonelines_unload', function()
     pcall(ui.sync_settings);        -- guarded, so the FontManager teardown below always runs
     pcall(settings.save);
     pcall(renderer.shutdown_gdi);   -- destroy the native FontManager (not just textures)
 end);
 
--------------------------------------------------------------------------------
 -- Event: Command
--------------------------------------------------------------------------------
 ashita.events.register('command', 'zonelines_command', function(e)
     local args = e.command:args();
     if (#args == 0 or not args[1]:lower():any('/zl', '/zonelines', '/zoneline')) then
@@ -300,11 +265,7 @@ ashita.events.register('command', 'zonelines_command', function(e)
     msg_error('Unknown command. Use /zl help for usage.');
 end);
 
--------------------------------------------------------------------------------
--- Event: packet_in (zone transition detection)
--- Suppress rendering during zone transitions to prevent stale markers.
--- Also invalidates cache on zone exit so new zone data loads cleanly.
--------------------------------------------------------------------------------
+-- Suppress and invalidate markers during zone transitions.
 ashita.events.register('packet_in', 'zonelines_pkt_in', function(e)
     if (e.id == 0x00B) then
         -- zone exit
@@ -318,13 +279,8 @@ ashita.events.register('packet_in', 'zonelines_pkt_in', function(e)
     end
 end);
 
--------------------------------------------------------------------------------
--- Event: d3d_beginscene (D3D8 depth-tested marker rendering)
--- Draws markers as 3D primitives on pass 2 (before game renders world).
--- Game geometry naturally occludes our markers via the depth buffer.
--------------------------------------------------------------------------------
--- An error in a per-frame handler would make Ashita unload the whole addon. Instead the part that failed stops
--- (so a half-drawn frame does not repeat every frame), the player is told once, and the rest keeps running.
+-- Draw markers before world geometry for depth occlusion. Disable a failed render path
+-- and report once instead of repeating a partial frame or unloading the addon.
 local stopped = { markers = false, window = false };
 local function stop_part(part, what, err)
     if (stopped[part]) then return; end
@@ -356,12 +312,7 @@ ashita.events.register('d3d_beginscene', 'zonelines_beginscene', function()
     if (not ok) then stop_part('markers', 'Zone line markers', err); end
 end);
 
--------------------------------------------------------------------------------
--- Event: d3d_present (ImGui rendering + UI window)
--- Draws text labels and the settings window.
--- Also caches view matrix and resets pass counter for next frame.
--------------------------------------------------------------------------------
--- The camera for the next frame's markers: view and projection matrices and the viewport.
+-- Render labels/settings and cache the camera matrices and viewport for the next frame.
 local function cache_view()
     if (s == nil or not renderer.hide_behind_walls or not s.visible) then return; end
     local dev = d3d8.get_device();
@@ -417,9 +368,7 @@ ashita.events.register('d3d_present', 'zonelines_present', function()
     if (not ok) then stop_part('window', 'The Zone Lines window', err); end
 end);
 
--------------------------------------------------------------------------------
 -- Event: Settings changed externally
--------------------------------------------------------------------------------
 settings.register('settings', 'zonelines_settings_update', function(new_s)
     if (new_s ~= nil) then
         s = new_s;

@@ -1,12 +1,13 @@
-# Shared by the addon release workflows (.github/workflows). The addon-specific part is .github/release.json.
-# Every addon repository has an identical copy: change them all together. Works in Windows PowerShell 5.1 and 7.
+# ZoneLines release packaging. File selection is defined in .github/release.json.
+# Works in Windows PowerShell 5.1 and 7.
 Set-StrictMode -Version 3
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'readme-tools.ps1')
 
 function Get-ReleaseConfig {
     param([string]$Root = '.')
     $cfg = Get-Content -Raw (Join-Path $Root '.github/release.json') | ConvertFrom-Json
-    foreach ($key in 'name', 'repository', 'addonFolder', 'versionFile', 'versionPattern') {
+    foreach ($key in 'name', 'repository', 'addonFolder', 'versionFile', 'versionPattern', 'files') {
         if ($cfg.PSObject.Properties.Name -notcontains $key) { throw ".github/release.json has no '$key'." }
     }
     return $cfg
@@ -49,26 +50,31 @@ function Invoke-Gh {
     throw "gh $(($Arguments | Select-Object -First 2) -join ' ') failed: $message"
 }
 
-# The files that ship, as @(full path, path inside the zip) pairs. Everything in the source except files and folders
-# whose name starts with '.' (.git, .github, .gitignore ...) and anything named in release.json's "exclude" list
-# (a folder or file name such as "tests", or a pattern such as "*.bak"; matched against every part of the path).
+# Require every listed file; unrelated source-folder contents never enter the ZIP.
 function Get-PackageFiles {
     param($Cfg, [string]$Source)
     $root = (Resolve-Path -LiteralPath $Source).Path.TrimEnd('\', '/')
-    $exclude = if ($Cfg.PSObject.Properties.Name -contains 'exclude') { @($Cfg.exclude) } else { @() }
     $files = New-Object System.Collections.Generic.List[object]
-    foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File -Force) {
-        $rel = $file.FullName.Substring($root.Length).TrimStart('\', '/').Replace('\', '/')
-        $parts = $rel -split '/'
-        if ($parts | Where-Object { $_.StartsWith('.') }) { continue }
-        $skip = $false
-        foreach ($pattern in $exclude) { if ($parts | Where-Object { $_ -like $pattern }) { $skip = $true; break } }
-        if ($skip) { continue }
-        $files.Add(@($file.FullName, "addons/$($Cfg.addonFolder)/$rel"))
+    $seen = @{}
+    foreach ($entry in $Cfg.files) {
+        $rel = "$entry".Replace('\', '/')
+        if (-not $rel -or $rel -match '(^/|:|[?*]|(^|/)\.[^/]*(/|$)|//)') {
+            throw "Invalid release file path: $entry"
+        }
+        if ($seen.ContainsKey($rel)) { throw "Duplicate release file: $rel" }
+        $seen[$rel] = $true
+        $path = Join-Path $root $rel
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required release file missing: $rel" }
+        $partPath = $root
+        foreach ($part in ($rel -split '/')) {
+            $partPath = Join-Path $partPath $part
+            if ((Get-Item -LiteralPath $partPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw "Release files cannot use symbolic links or junctions: $rel"
+            }
+        }
+        $files.Add(@($path, "addons/$($Cfg.addonFolder)/$rel"))
     }
-    if (-not ($files | Where-Object { $_[1] -eq "addons/$($Cfg.addonFolder)/$($Cfg.addonFolder).lua" })) {
-        throw "$($Cfg.addonFolder).lua is not in the package: Ashita loads an addon from addons\$($Cfg.addonFolder)\$($Cfg.addonFolder).lua."
-    }
+    if (-not $seen.ContainsKey("$($Cfg.addonFolder).lua")) { throw 'The addon entry point is missing from the release file list.' }
     return , $files
 }
 
@@ -80,12 +86,24 @@ function New-AddonPackage {
     $outPath = (Resolve-Path -LiteralPath $OutDir).Path
     $zipName = "$($Cfg.name)-v$Version.zip"
     $zipPath = Join-Path $outPath $zipName
+    $readmes = @{}
+    foreach ($f in $Files) {
+        if ((Split-Path $f[0] -Leaf) -ieq 'README.md') {
+            $readmes[$f[0]] = ConvertTo-ReleaseReadme ([IO.File]::ReadAllText($f[0]))
+        }
+    }
     if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath }
     Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
     $zip = [IO.Compression.ZipFile]::Open($zipPath, [IO.Compression.ZipArchiveMode]::Create)
     try {
         foreach ($f in $Files) {
-            [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $f[0], $f[1], [IO.Compression.CompressionLevel]::Optimal)
+            if ($readmes.ContainsKey($f[0])) {
+                $entry = $zip.CreateEntry($f[1], [IO.Compression.CompressionLevel]::Optimal)
+                $writer = New-Object IO.StreamWriter($entry.Open(), (New-Object Text.UTF8Encoding($false)))
+                try { $writer.Write($readmes[$f[0]]) } finally { $writer.Dispose() }
+            } else {
+                [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $f[0], $f[1], [IO.Compression.CompressionLevel]::Optimal)
+            }
         }
     } finally { $zip.Dispose() }
     $hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()

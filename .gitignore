@@ -1,5 +1,26 @@
-# Windows and editor files
+# Local notes and development files
+/DISCORD_POST.md
+/DEV_TRACKING.md
+/tools/
+/tests/
+/build/
+/dist/
+/exports/
+.env
+.env.*
+.vscode/
+__pycache__/
+*.pyc
+*.log
+*.tmp
+*.bak
+*.orig
+*.rej
+*.swp
+*~
+*.png
+*.jpg
+*.jpeg
 Thumbs.db
 desktop.ini
 .DS_Store
-.vscode/

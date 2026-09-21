@@ -1,14 +1,4 @@
---[[
-    ZoneLines v1.3.1 - Data Layer
-    Loads pre-extracted zone line bounding boxes from zones_data.lua,
-    supplemental trigger-area transitions from supplemental_zones.lua,
-    and pre-computed terrain heights from terrain_heights.lua.
-
-    Data sources (merged in order):
-      1. zones_data.lua        — DAT-extracted zone line bounding boxes (auto-generated)
-      2. supplemental_zones.lua — Hand-added trigger-area transitions (e.g. palace gates)
-      3. terrain_heights.lua   — Pre-computed ground heights from navmesh data
-]]--
+-- Load DAT zone-line bounds, supplemental triggers and terrain heights.
 
 require 'common';
 
@@ -38,9 +28,7 @@ data.zone_cache = T{};
 data.zone_cache_id = -1;
 
 
--------------------------------------------------------------------------------
 -- Initialization
--------------------------------------------------------------------------------
 
 function data.init(addon_path)
     local addon_dir = addon_path:gsub('\\config\\addons\\zonelines$', '\\addons\\zonelines');
@@ -115,9 +103,7 @@ function data.init(addon_path)
 
 end
 
--------------------------------------------------------------------------------
 -- Zone Name Resolution (runtime, from FFXI client resource strings)
--------------------------------------------------------------------------------
 
 local function resolve_zone_name(zone_id)
     if (zone_id == nil or zone_id < 0) then return ''; end
@@ -141,9 +127,7 @@ local function resolve_zone_name(zone_id)
     return fallback;
 end
 
--------------------------------------------------------------------------------
 -- Display Name Resolution (shared helper — single source of truth)
--------------------------------------------------------------------------------
 
 local function compute_display_name(entry)
     if (entry.label ~= nil and entry.label ~= '') then
@@ -158,9 +142,7 @@ local function compute_display_name(entry)
     return '';
 end
 
--------------------------------------------------------------------------------
 -- Zone Line Access
--------------------------------------------------------------------------------
 
 function data.get_zone_lines(zone_id)
     if (not data.cache_dirty and data.zone_cache_id == zone_id) then
@@ -187,10 +169,8 @@ function data.get_zone_lines(zone_id)
             -- Supplemental trigger-area entries use ident='trig'
             local src = (entry.ident == 'trig') and 'trigger' or 'dat';
 
-            -- Attach pre-computed terrain heights (array index matches entry order).
-            -- Only use terrain data for DAT entries (indices 1..dat_count).
-            -- Supplemental entries appended beyond dat_count must not pick up
-            -- orphaned terrain data from zone lines filtered during extraction.
+            -- Terrain indices match DAT entry order only; supplemental entries must not inherit leftover
+            -- heights.
             local heights = nil;
             local dat_count = data.dat_entry_counts[zone_id] or 0;
             if (zone_terrain ~= nil and zone_terrain[ei] ~= nil and ei <= dat_count) then

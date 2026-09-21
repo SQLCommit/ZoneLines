@@ -4,14 +4,25 @@
   "addonFolder": "zonelines",
   "versionFile": "zonelines.lua",
   "versionPattern": "(?m)^\\s*addon\\.version\\s*=\\s*'([0-9]+(?:\\.[0-9]+){1,2})'",
-  "exclude": [
-    "tests",
-    "tools",
-    "TestIcons",
-    "*.bak",
-    "*.log",
-    "*.tmp",
-    "*.db-wal",
-    "*.db-shm"
+  "files": [
+    "data.lua",
+    "renderer.lua",
+    "supplemental_zones.lua",
+    "terrain_heights.lua",
+    "ui.lua",
+    "zonelines.lua",
+    "zones_data.lua",
+    "README.md",
+    "CHANGELOG.md",
+    "FONTS.md",
+    "LICENSE",
+    "fonts/GrammaraNormal-RvLv.ttf",
+    "fonts/INSTALL FONTS - READ ME FIRST.txt",
+    "fonts/MysticGate.ttf",
+    "fonts/Oswald-Regular.ttf",
+    "gdifonts/LICENSE",
+    "gdifonts/fontobject.lua",
+    "gdifonts/gdifonttexture.dll",
+    "gdifonts/include.lua"
   ]
 }

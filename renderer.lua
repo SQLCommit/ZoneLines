@@ -1,10 +1,4 @@
---[[
-    ZoneLines v1.3.1 - Zone Line Rendering via D3D8
-
-    Zone line bounding boxes have a thin dimension (depth you walk through)
-    and a wide dimension (spanning the passage). The dotted line is drawn
-    along the wider dimension, hovering above the terrain surface.
-]]--
+-- ZoneLines D3D8 markers. Draw along each boundary's wider edge, above the terrain.
 
 require 'common';
 
@@ -16,9 +10,7 @@ local chat  = require 'chat';
 local renderer = {};
 
 
--------------------------------------------------------------------------------
 -- D3D8 FFI: vertex structs and render constants
--------------------------------------------------------------------------------
 
 ffi.cdef[[
     typedef struct {
@@ -44,7 +36,7 @@ local TEXTURED_VERTEX_SIZE     = 24;     -- sizeof(zl_d3d_textured_vertex_t)
 
 -- Render state keys
 local D3DRS_ZENABLE          = 7;
-local D3DRS_ZWRITEENABLE     = 14;   -- CRITICAL: 14 not 15 (15 = ALPHATESTENABLE)
+local D3DRS_ZWRITEENABLE     = 14;   -- Depth writes; 15 is alpha-test enable.
 local D3DRS_ALPHATESTENABLE  = 15;
 local D3DRS_SRCBLEND         = 19;
 local D3DRS_DESTBLEND        = 20;
@@ -150,9 +142,7 @@ renderer.dot_glow_min       = 0.4;      -- pulse minimum (0-1)
 renderer.dot_glow_max       = 1.0;      -- pulse maximum (0-1)
 
 
--------------------------------------------------------------------------------
 -- D3D Text: world position -> screen, drawn in an ortho pass for depth-tested labels.
--------------------------------------------------------------------------------
 
 -- Project world → screen + NDC Z (for depth testing in ortho pass)
 local function project_with_z(view, proj, vp_w, vp_h, wx, wy, wz)
@@ -176,9 +166,7 @@ local function project_with_z(view, proj, vp_w, vp_h, wx, wy, wz)
     return sx, sy, true, ndcz;
 end
 
--------------------------------------------------------------------------------
 -- Dotted Line Tuning
--------------------------------------------------------------------------------
 
 -- Adjustable via settings
 local DOT_SPACING    = 0.3;    -- Visual dot spacing (yalms) — interpolates terrain
@@ -288,9 +276,7 @@ function renderer.invalidate_curtain_cache()
     curtain_cache = {};
 end
 
--------------------------------------------------------------------------------
 -- Distance Calculation (XZ plane)
--------------------------------------------------------------------------------
 
 local function distance_xz(x1, z1, x2, z2)
     local dx = x1 - x2;
@@ -298,10 +284,7 @@ local function distance_xz(x1, z1, x2, z2)
     return math.sqrt(dx * dx + dz * dz);
 end
 
--- Distance from player to the nearest point on a zone line's front edge.
--- For curtain zone lines (bounding boxes), this measures to the closest point
--- on the wall line at the player-facing depth edge — the actual zone trigger.
--- For circles (portals), falls back to center distance.
+-- Measure distance to the player-facing trigger edge; portals use center distance.
 local function distance_to_zoneline(px, pz, zl)
     if (zl.sx == nil or zl.sz == nil or zl.sx <= 0 or zl.sz <= 0) then
         return distance_xz(px, pz, zl.x, zl.z);
@@ -328,10 +311,7 @@ local function distance_to_zoneline(px, pz, zl)
     return math.sqrt(dlx * dlx + dlz * dlz);
 end
 
--------------------------------------------------------------------------------
--- Compute curtain dot positions along the wider box edge.
--- Returns: { positions = {{wx,wy,wz}, ...}, hover_y, label_x, label_z }
--------------------------------------------------------------------------------
+-- Compute curtain dots along the wider edge. Return positions, hover_y and label coordinates.
 
 local function compute_curtain_positions(wx, wy, wz, half_sx, half_sy, half_sz,
                                           rot_y, player_x, player_z, terrain_heights, rect_id, edge_trim)
@@ -368,10 +348,7 @@ local function compute_curtain_positions(wx, wy, wz, half_sx, half_sy, half_sz,
     end
     local depth_offset = depth_sign * depth_half;
 
-    -- Result cache: the output is a pure function of (rect_id, depth_sign, settings).
-    -- Geometry and terrain are static per zone line; only the facing edge and tuning
-    -- settings change. On a hit we skip the terrain interpolation, 3-pass smoothing,
-    -- gradient blend, and all per-dot allocations.
+    -- Cache by rectangle, facing edge and settings; geometry and terrain are static between zone changes.
     if (rect_id ~= nil) then
         local c = curtain_cache[rect_id];
         if (c ~= nil and c.sign == depth_sign and c.rev == settings_rev) then
@@ -525,11 +502,8 @@ local function compute_curtain_positions(wx, wy, wz, half_sx, half_sy, half_sz,
         entry_gradient = entry_ovr.flatten;
     end
 
-    -- Gradient flattening with smooth blend: scan from center outward. Flatten when:
-    -- 1) Per-dot slope exceeds threshold (sharp cliff), OR
-    -- 2) Total deviation from center height exceeds entry_gradient * 3 (gradual slope
-    --    that accumulates — e.g. valley dips like Tahrongi Canyon).
-    -- Threshold is normalized by DOT_SPACING so it measures slope (yalms/yalm).
+    -- Flatten when local slope exceeds the threshold or center-height deviation exceeds 3*entry_gradient.
+    -- Normalize slope by DOT_SPACING.
     if (n >= 3) then
         local center = math.floor(n / 2) + 1;
         local BLEND_DOTS = 6;
@@ -609,9 +583,7 @@ end
 
 
 
--------------------------------------------------------------------------------
 -- Check: is this zone line a dotted curtain?
--------------------------------------------------------------------------------
 
 local function is_curtain_zoneline(zl)
     local has_box = (zl.sx ~= nil and zl.sx > 0 and zl.sz ~= nil and zl.sz > 0);
@@ -626,10 +598,7 @@ local function is_curtain_zoneline(zl)
 end
 
 
--------------------------------------------------------------------------------
--- D3D8 Depth-Tested Rendering: Billboard diamond dot
--- Draws a camera-facing diamond at (wx, wy, wz) in world units.
--------------------------------------------------------------------------------
+-- Draw a round billboard dot in world space.
 
 -- Single gradient circle: center = core_col (bright), rim = glow_col (dim).
 -- Billboard fan with DOT_CIRCLE_SEGS segments for smooth round shape.
@@ -664,10 +633,7 @@ local function draw_d3d_dot_gradient(device, rx, ry, rz, ux, uy, uz,
     device:DrawPrimitiveUP(D3DPT_TRIANGLELIST, DOT_CIRCLE_SEGS, d3d_verts, VERTEX_SIZE);
 end
 
--------------------------------------------------------------------------------
--- D3D8 Depth-Tested Rendering: Flat circle on ground plane
--- Draws a filled circle at (wx, wy, wz) with given radius, lying on XZ plane.
--------------------------------------------------------------------------------
+-- Draw a filled circle on the XZ plane.
 
 local function draw_d3d_circle(device, wx, wy, wz, radius, color_argb)
     local angle_step = (2 * math.pi) / CIRCLE_SEGS;
@@ -699,10 +665,7 @@ local function draw_d3d_circle(device, wx, wy, wz, radius, color_argb)
     device:DrawPrimitiveUP(D3DPT_TRIANGLELIST, CIRCLE_SEGS, circle_verts, VERTEX_SIZE);
 end
 
--------------------------------------------------------------------------------
--- D3D Pole: Thin vertical billboard quad from (wx, wy, wz) upward by height
--- Uses camera right vector so the pole always faces the player.
--------------------------------------------------------------------------------
+-- Draw a vertical quad using camera-right for billboard orientation.
 
 local POLE_HALF_WIDTH = 0.04;  -- half-width in yalms
 
@@ -733,9 +696,7 @@ local function draw_d3d_pole(device, wx, wy, wz, height, rx, ry, rz, color_argb)
     device:DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2, pole_verts, VERTEX_SIZE);
 end
 
--------------------------------------------------------------------------------
--- D3D Border Style: Dots (style 0) — billboard diamonds per position
--------------------------------------------------------------------------------
+-- Dots (style 0): round billboards at each position.
 
 local function draw_d3d_style_dots(device, cdata, rx, ry, rz, ux, uy, uz, core_col, glow_col, dot_size)
     local sz = dot_size or D3D_DOT_GLOW_SIZE;
@@ -746,11 +707,7 @@ local function draw_d3d_style_dots(device, cdata, rx, ry, rz, ux, uy, uz, core_c
 end
 
 
--------------------------------------------------------------------------------
--- D3D8 Depth-Tested Rendering: Main entry point
--- Called from d3d_beginscene pass 2 (before game renders world geometry).
--- Game geometry naturally occludes markers via depth buffer.
--------------------------------------------------------------------------------
+-- Draw in BeginScene pass 2 so subsequent world geometry occludes the markers.
 
 local function get_d3d_dot_colors(dist)
     if (not USE_DIST_COLORS) then
@@ -771,15 +728,9 @@ local function get_d3d_circle_color(dist)
     return D3D_CIRCLE_FAR;
 end
 
--------------------------------------------------------------------------------
--- Extracted pass functions (own upvalue budgets — avoids LuaJIT 60-upvalue
--- limit on the main draw_d3d pcall closure)
--------------------------------------------------------------------------------
+-- Separate passes to stay below LuaJIT's 60-upvalue limit.
 
--- ============================================================================
--- GdiFonts labels: GDI renders each string (+outline) into a texture WE own
--- (stable, unlike the ImGui atlas), drawn as a depth-tested quad so terrain occludes it.
--- ============================================================================
+-- Render GDI text into owned textures, then draw depth-tested quads.
 local gdi = nil;
 local gdi_tried = false;
 local function ensure_gdi()
@@ -797,11 +748,7 @@ renderer.gdi_font_family   = 'Arial';
 renderer.gdi_outline_width = 2;     -- label outline thickness (px at render res)
 renderer.gdi_bold          = true;  -- bold label text
 
--- ----------------------------------------------------------------------------
--- Font picker = common Windows fonts + bundled fonts/ the user has installed.
--- Read-only: never installs fonts or writes the registry; only offers a bundled
--- font once GdiFonts confirms it's installed (get_font_available).
--- ----------------------------------------------------------------------------
+-- Offer common Windows fonts and installed bundled fonts. Never install fonts or modify the registry.
 local COMMON_FONTS = { 'Arial', 'Calibri', 'Segoe UI', 'Consolas', 'Verdana', 'Tahoma', 'Trebuchet MS', 'Times New Roman' };
 renderer.font_list = COMMON_FONTS;     -- rebuilt (common + installed bundled) by scan_fonts
 
@@ -929,10 +876,7 @@ function renderer.cleanup_gdi()
         gdi_cache[k] = nil;
     end
 end
--- Full teardown for UNLOAD ONLY. Destroys the native GdiFonts FontManager so a
--- fresh /addon load doesn't leak one. The module re-runs CreateFontManager on each
--- load (fresh Lua state); without this, rapid reloads accumulate FontManagers in the
--- persistent DLL and corrupt its heap (STATUS_HEAP_CORRUPTION, c0000374).
+-- Destroy the native FontManager on unload; the persistent DLL otherwise retains one per reload.
 function renderer.shutdown_gdi()
     if (gdi == nil) then return; end
     renderer.cleanup_gdi();
@@ -1138,9 +1082,7 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
         apply_settings(s);
     end
 
-    -- Quick pre-check: skip entire render state manipulation if no zone line
-    -- is within render distance.  Setting/restoring D3D state on every frame
-    -- even when nothing is drawn can cause sky blinking in open areas.
+    -- Skip state changes when no markers are visible; unnecessary state churn can cause sky flicker.
     local render_dist = s.render_distance or 100.0;
     local any_visible = false;
     for _, zl in ipairs(zone_lines) do
@@ -1154,7 +1096,6 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
     if (not any_visible) then return; end
 
     -- Extract camera right/up vectors from view matrix for billboard orientation
-    -- (view is a plain Lua table — field access is safe, no pcall needed)
     local rx, ry, rz = view._11, view._21, view._31;
     local ux, uy, uz = view._12, view._22, view._32;
     if (type(rx) ~= 'number' or type(uy) ~= 'number') then return; end
@@ -1164,7 +1105,7 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
     local ulen = math.sqrt(ux * ux + uy * uy + uz * uz);
     if (ulen > 0.001) then ux = ux / ulen; uy = uy / ulen; uz = uz / ulen; end
 
-    -- Save ALL render states (must restore even if drawing errors out)
+    -- Save render states for restoration even if drawing fails.
     local _, save_light    = device:GetRenderState(D3DRS_LIGHTING);
     local _, save_zenable  = device:GetRenderState(D3DRS_ZENABLE);
     local _, save_zwrite   = device:GetRenderState(D3DRS_ZWRITEENABLE);
@@ -1175,7 +1116,7 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
     local _, save_dstblend = device:GetRenderState(D3DRS_DESTBLEND);
     local _, save_cull     = device:GetRenderState(D3DRS_CULLMODE);
     local _, save_atest    = device:GetRenderState(D3DRS_ALPHATESTENABLE);
-    local _, save_aref     = device:GetRenderState(D3DRS_ALPHAREF);   -- text pass sets these (0x40 / GREATEREQUAL);
+    local _, save_aref     = device:GetRenderState(D3DRS_ALPHAREF);   -- Preserve the game's alpha-test settings.
     local _, save_afunc    = device:GetRenderState(D3DRS_ALPHAFUNC);  -- save so we don't leak them into the world draw
     local _, save_fog      = device:GetRenderState(D3DRS_FOGENABLE);  -- zone fog tints our text/markers if left on
     local _, save_fvf      = device:GetVertexShader();
@@ -1204,8 +1145,7 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
     -- Set render states for depth-tested colored primitives
     device:SetTexture(0, nil);
     device:SetVertexShader(D3DFVF_XYZ_DIFFUSE);
-    -- CRITICAL: Disable any active pixel shader. ImGui/d3d8to9 leaves a pixel shader
-    -- active that overrides all TextureStageState settings, producing garbled output.
+    -- Disable shaders left by ImGui/d3d8to9; they override texture-stage settings.
     device:SetPixelShader(0);
     device:SetRenderState(D3DRS_LIGHTING, 0);
     device:SetRenderState(D3DRS_FOGENABLE, 0);           -- no zone fog tinting our markers/text
@@ -1227,7 +1167,7 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
     -- World transform = identity (vertices already in world space)
     device:SetTransform(D3DTS_WORLD, identity_matrix);
 
-    -- ══ Drawing code wrapped in pcall — state restore ALWAYS runs below ══
+    -- Restore saved states after drawing, including on failure.
     local draw_ok, draw_err = pcall(function()
         local render_dist  = s.render_distance or 100.0;
         local want_labels  = renderer.d3d_show_labels;
@@ -1237,7 +1177,7 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
         -- Collect label data during marker loop (drawn in text pass)
         frame_labels_n = 0;
 
-        -- ── Glow pulse (modulates existing dots — no separate pass needed) ──
+        -- Modulate existing dots for the glow pulse.
         local glow_pulse = 1.0;
         local glow_size_mult = 1.0;
         if (renderer.dot_glow_enabled) then
@@ -1250,7 +1190,7 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
             glow_size_mult = 1.0 - (1.0 - glow_pulse) * 0.3; -- subtle size breathing
         end
 
-        -- ── Pass 1: Untextured colored markers (dots + circles) ──
+        -- Draw untextured markers first.
 
         for _, zl in ipairs(zone_lines) do
             local dist = distance_xz(player_x, player_z, zl.x, zl.z);
@@ -1342,20 +1282,17 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
             end
         end
 
-        -- ── Pass 2: Text labels ──
-        -- (Extracted to standalone function to stay within LuaJIT 60-upvalue limit)
+        -- Separate label pass stays below LuaJIT's 60-upvalue limit.
         draw_text_pass(device, view, text_scale);
     end);
 
-    -- ══ ALWAYS restore render states (even if drawing errored out) ══
+    -- Restore render states even if drawing failed.
     if (save_world ~= nil) then device:SetTransform(D3DTS_WORLD, table_to_matrix(save_world, restore_world)); end
     if (save_view ~= nil) then device:SetTransform(2, table_to_matrix(save_view, restore_view)); end
     if (save_proj ~= nil) then device:SetTransform(3, table_to_matrix(save_proj, restore_proj)); end
     device:SetTexture(0, save_tex);
-    -- GetTexture(0) AddRef'd this texture (Ashita's wrapper returns the raw
-    -- pointer, no ffi.gc). Release the reference we own or its refcount climbs
-    -- every frame, pinning zone textures alive across zone changes (VRAM creep).
-    -- A NULL cdata pointer compares == nil, so this also covers "nothing bound".
+    -- GetTexture adds a reference; the wrapper supplies no finalizer, so release it each frame.
+    -- A null cdata pointer compares equal to nil.
     if (save_tex ~= nil) then save_tex:Release(); end
     device:SetRenderState(D3DRS_LIGHTING, save_light);
     device:SetRenderState(D3DRS_FOGENABLE, save_fog);

@@ -21,13 +21,8 @@ ui.is_open = T{ false };
 ui.settings_dirty = false;
 ui.reset_pending = false;
 
--------------------------------------------------------------------------------
--- Widget buffers packed into single table (LuaJIT upvalue limit).
--- NOTE: these initial values are placeholders only — sync_from_settings()
--- overwrites every one at init from the saved settings (which settings.load
--- has already filled from default_settings). The single source of truth for
--- defaults is default_settings in zonelines.lua.
--------------------------------------------------------------------------------
+-- Pack widget buffers in one table to limit upvalues. Initialize all values from saved settings;
+-- defaults belong in zonelines.lua.
 
 local B = {
     visible              = { true },
@@ -65,9 +60,7 @@ local B = {
 local DIST_POS_NAMES = 'Bottom\0Top\0Left\0Right\0';
 local DIST_POS_VALUES = { 'bottom', 'top', 'left', 'right' };
 
--- Label font families (GdiFonts). Combo index -> family name.
--- Font picker is dynamic: renderer.font_list = common Windows fonts + any
--- TTF/OTF dropped into addons/zonelines/fonts/ (auto-registered at addon load).
+-- Map picker indices to common Windows fonts and installed fonts from fonts/.
 local function font_values()
     local l = renderer.font_list;
     if (l == nil or #l == 0) then return { 'Arial' }; end
@@ -80,9 +73,7 @@ end
 -- Per-zone-line override buffers (keyed by tostring(rect_id))
 local override_bufs = {};
 
--------------------------------------------------------------------------------
 -- Color theme
--------------------------------------------------------------------------------
 
 local colors = {
     sub       = { 1.0, 0.65, 0.26, 1.0 },  -- orange
@@ -92,17 +83,13 @@ local colors = {
     cat_hover = { 0.25, 0.50, 0.25, 1.0 }, -- green hover
 };
 
--------------------------------------------------------------------------------
 -- Category definitions
--------------------------------------------------------------------------------
 
 local CATEGORIES = { 'Markers', 'Labels', 'Colors', 'Fade', 'Zone Lines', 'Overrides' };
 local selected_cat = 1;
 local SIDEBAR_W = 110;
 
--------------------------------------------------------------------------------
 -- Helpers
--------------------------------------------------------------------------------
 
 local function sub_header(label)
     imgui.TextColored(colors.sub, label);
@@ -139,9 +126,7 @@ local function sync_renderer_fields()
     renderer.dot_glow_max       = B.dot_glow_max[1];
 end
 
--------------------------------------------------------------------------------
 -- Sync settings <-> ImGui buffers
--------------------------------------------------------------------------------
 
 local function sync_from_settings()
     if (settings_ref == nil or defaults_ref == nil) then return; end
@@ -245,17 +230,13 @@ local function sync_to_settings()
     -- zoneline_overrides synced directly when slider changes (not via buffers)
 end
 
--------------------------------------------------------------------------------
--- Public sync (called from main before settings.save, matching other addons)
--------------------------------------------------------------------------------
+-- Sync widget values before saving settings.
 
 function ui.sync_settings()
     sync_to_settings();
 end
 
--------------------------------------------------------------------------------
 -- Initialization
--------------------------------------------------------------------------------
 
 function ui.init(data, s, defaults)
     data_ref = data;
@@ -264,9 +245,7 @@ function ui.init(data, s, defaults)
     sync_from_settings();
 end
 
--------------------------------------------------------------------------------
 -- Settings sync (called when settings change externally)
--------------------------------------------------------------------------------
 
 function ui.apply_settings(s)
     settings_ref = s;
@@ -275,9 +254,7 @@ function ui.apply_settings(s)
     override_bufs = {};
 end
 
--------------------------------------------------------------------------------
 -- Category: Markers
--------------------------------------------------------------------------------
 
 local function render_cat_markers()
     local changed = false;
@@ -357,9 +334,7 @@ local function render_cat_markers()
     end
 end
 
--------------------------------------------------------------------------------
 -- Category: Labels
--------------------------------------------------------------------------------
 
 local function render_cat_labels()
     local changed = false;
@@ -469,9 +444,7 @@ local function render_cat_labels()
     end
 end
 
--------------------------------------------------------------------------------
 -- Category: Colors
--------------------------------------------------------------------------------
 
 local function render_cat_colors()
     local changed = false;
@@ -510,9 +483,7 @@ local function render_cat_colors()
     end
 end
 
--------------------------------------------------------------------------------
 -- Category: Fade
--------------------------------------------------------------------------------
 
 local function render_cat_fade()
     local changed = false;
@@ -543,9 +514,7 @@ local function render_cat_fade()
     end
 end
 
--------------------------------------------------------------------------------
 -- Category: Zone Lines
--------------------------------------------------------------------------------
 
 local function render_cat_zonelines(zone_id)
     local zone_lines = data_ref.get_zone_lines(zone_id);
@@ -601,9 +570,7 @@ local function render_cat_zonelines(zone_id)
     end
 end
 
--------------------------------------------------------------------------------
 -- Category: Overrides
--------------------------------------------------------------------------------
 
 local function render_cat_overrides(zone_id)
     imgui.TextColored(colors.dimmed, 'Per-zone-line overrides. Expand an entry to adjust.');
@@ -699,9 +666,7 @@ local function render_cat_overrides(zone_id)
     end
 end
 
--------------------------------------------------------------------------------
 -- Renderer dispatch table
--------------------------------------------------------------------------------
 
 local cat_renderers = {
     render_cat_markers,
@@ -712,9 +677,7 @@ local cat_renderers = {
     render_cat_overrides,
 };
 
--------------------------------------------------------------------------------
 -- Main render: header + sidebar + detail panel + footer
--------------------------------------------------------------------------------
 
 function ui.render(zone_id, zone_name)
     if (not ui.is_open[1]) then return; end

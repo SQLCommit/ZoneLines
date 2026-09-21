@@ -113,6 +113,10 @@ jobs:
       - name: Install LuaJIT
         run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends luajit
 
+      - name: Check release packaging
+        shell: pwsh
+        run: ./ci/.github/scripts/test-release-package.ps1 -Source ./src -ConfigRoot ./ci
+
       - name: Check and pack
         id: package
         shell: pwsh
