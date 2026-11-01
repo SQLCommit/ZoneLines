@@ -43,6 +43,10 @@ local default_settings = T{
     d3d_font_family      = 'Arial',    -- GdiFonts label font family
     d3d_outline_width    = 2,          -- label outline thickness
     d3d_bold             = true,       -- bold labels
+    d3d_text_color       = T{ 1.0, 1.0, 1.0 },  -- label text color
+    d3d_gradient_style   = 0,          -- gdifonts Gradient enum (0 = none)
+    d3d_gradient_color   = T{ 1.0, 1.0, 1.0 },  -- gradient end color
+    d3d_outline_color    = T{ 0.0, 0.0, 0.0 },  -- label outline color
     d3d_show_labels      = true,
     d3d_show_distance    = true,
     d3d_dist_position    = 'bottom',  -- 'bottom', 'top', 'left', 'right'
@@ -143,6 +147,10 @@ local function sync_renderer(settings_ref)
     renderer.gdi_font_family    = settings_ref.d3d_font_family or default_settings.d3d_font_family;
     renderer.gdi_outline_width  = settings_ref.d3d_outline_width or default_settings.d3d_outline_width;
     renderer.gdi_bold           = (settings_ref.d3d_bold ~= false);
+    renderer.gdi_text_color     = settings_ref.d3d_text_color or default_settings.d3d_text_color;
+    renderer.gdi_gradient_style = settings_ref.d3d_gradient_style or default_settings.d3d_gradient_style;
+    renderer.gdi_gradient_color = settings_ref.d3d_gradient_color or default_settings.d3d_gradient_color;
+    renderer.gdi_outline_color  = settings_ref.d3d_outline_color or default_settings.d3d_outline_color;
     renderer.d3d_show_labels    = (settings_ref.d3d_show_labels ~= false);
     renderer.d3d_show_distance  = (settings_ref.d3d_show_distance ~= false);
     renderer.d3d_dist_position  = settings_ref.d3d_dist_position or default_settings.d3d_dist_position;
@@ -373,6 +381,7 @@ settings.register('settings', 'zonelines_settings_update', function(new_s)
     if (new_s ~= nil) then
         s = new_s;
         sync_renderer(s);
+        pcall(renderer.cleanup_gdi);   -- rebuild cached label textures in the new style
         renderer.mark_settings_dirty();
         ui.apply_settings(s);
     end

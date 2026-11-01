@@ -39,7 +39,7 @@ The main file should be at `/ashita/addons/zonelines/zonelines.lua`.
 | :--- | :--- |
 | **Zone boundaries** | Markers for 846 zone lines across 198 zones, plus supplemental transitions. |
 | **World markers** | Terrain-following dots, portal circles, and poles hidden by walls and terrain. |
-| **Destination labels** | Zone names and distance with adjustable fonts, outlines, and placement. |
+| **Destination labels** | Zone names and distance with adjustable fonts, text and outline colors, gradients, and placement. |
 | **Appearance** | Change marker size, pulse, distance colors, and distance fade. |
 | **Individual adjustments** | Change height, trim, flattening, visibility, and pole height for a specific zone line. |
 
