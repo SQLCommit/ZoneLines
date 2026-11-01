@@ -43,6 +43,8 @@ local B = {
     d3d_outline_width    = { 2.0 },
     d3d_bold             = { true },
     d3d_label_spacing    = { 2 },
+    d3d_label_type_idx   = { 0 },
+    d3d_sign_height      = { 0.4 },
     dot_glow_enabled     = { true },
     dot_glow_speed       = { 2.0 },
     dot_glow_intensity   = { 0.5 },
@@ -59,6 +61,8 @@ local B = {
 
 local DIST_POS_NAMES = 'Bottom\0Top\0Left\0Right\0';
 local DIST_POS_VALUES = { 'bottom', 'top', 'left', 'right' };
+local LABEL_TYPE_NAMES = 'Screen\0In-World Sign\0';
+local LABEL_TYPE_VALUES = { 'screen', 'world' };
 
 -- Map picker indices to common Windows fonts and installed fonts from fonts/.
 local function font_values()
@@ -115,6 +119,8 @@ local function sync_renderer_fields()
     renderer.gdi_outline_width  = B.d3d_outline_width[1];
     renderer.gdi_bold           = B.d3d_bold[1];
     renderer.d3d_label_spacing  = B.d3d_label_spacing[1];
+    renderer.d3d_world_labels   = (B.d3d_label_type_idx[1] == 1);
+    renderer.d3d_sign_height    = B.d3d_sign_height[1];
     renderer.d3d_text_scale     = B.d3d_text_scale[1];
     renderer.d3d_label_offset   = B.d3d_label_offset[1];
     renderer.d3d_text_min_scale = B.d3d_text_min_scale[1];
@@ -162,6 +168,8 @@ local function sync_from_settings()
         if (DIST_POS_VALUES[i] == dp) then B.d3d_dist_pos_idx[1] = i - 1; break; end
     end
     B.d3d_label_spacing[1]  = settings_ref.d3d_label_spacing or defaults_ref.d3d_label_spacing;
+    B.d3d_label_type_idx[1] = (settings_ref.d3d_label_type == 'world') and 1 or 0;
+    B.d3d_sign_height[1]    = settings_ref.d3d_sign_height or defaults_ref.d3d_sign_height;
     B.dot_glow_enabled[1]   = (settings_ref.dot_glow_enabled ~= false);
     B.dot_glow_speed[1]     = settings_ref.dot_glow_speed or defaults_ref.dot_glow_speed;
     B.dot_glow_intensity[1] = settings_ref.dot_glow_intensity or defaults_ref.dot_glow_intensity;
@@ -215,6 +223,8 @@ local function sync_to_settings()
     settings_ref.d3d_outline_width  = B.d3d_outline_width[1];
     settings_ref.d3d_bold           = B.d3d_bold[1];
     settings_ref.d3d_label_spacing  = B.d3d_label_spacing[1];
+    settings_ref.d3d_label_type     = LABEL_TYPE_VALUES[B.d3d_label_type_idx[1] + 1] or 'screen';
+    settings_ref.d3d_sign_height    = B.d3d_sign_height[1];
     settings_ref.dot_glow_enabled   = B.dot_glow_enabled[1];
     settings_ref.dot_glow_speed     = B.dot_glow_speed[1];
     settings_ref.dot_glow_intensity = B.dot_glow_intensity[1];
@@ -357,6 +367,14 @@ local function render_cat_labels()
     end
     tip('Show distance to zone line.');
 
+    imgui.PushItemWidth(140);
+    if (imgui.Combo('Type##labeltype', B.d3d_label_type_idx, LABEL_TYPE_NAMES)) then
+        changed = true;
+        renderer.d3d_world_labels = (B.d3d_label_type_idx[1] == 1);
+    end
+    imgui.PopItemWidth();
+    tip('Screen: flat text that always faces you. In-World Sign: upright sign standing along the dots, with real perspective. Portal labels are always Screen.');
+
     if (B.d3d_show_distance[1]) then
         imgui.Spacing();
         sub_header('Distance Position');
@@ -374,7 +392,7 @@ local function render_cat_labels()
             changed = true;
             renderer.d3d_label_spacing = B.d3d_label_spacing[1];
         end
-        tip('Extra pixel gap between zone name and distance text.');
+        tip('Extra gap between zone name and distance text (pixels; scaled with the sign in In-World Sign mode).');
     end
 
     imgui.Spacing();
@@ -407,12 +425,21 @@ local function render_cat_labels()
     end
     tip('Black outline thickness around label text.');
 
-    c = imgui.SliderFloat('Font Size', B.d3d_text_scale, 0.3, 3.0, '%.1f');
-    if (c) then
-        changed = true;
-        renderer.d3d_text_scale = B.d3d_text_scale[1];
+    if (B.d3d_label_type_idx[1] == 1) then
+        c = imgui.SliderFloat('Sign Height', B.d3d_sign_height, 0.1, 2.0, '%.2f yalms');
+        if (c) then
+            changed = true;
+            renderer.d3d_sign_height = B.d3d_sign_height[1];
+        end
+        tip('Height of one line of sign text, in yalms.');
+    else
+        c = imgui.SliderFloat('Font Size', B.d3d_text_scale, 0.3, 3.0, '%.1f');
+        if (c) then
+            changed = true;
+            renderer.d3d_text_scale = B.d3d_text_scale[1];
+        end
+        tip('Base font size multiplier for labels.');
     end
-    tip('Base font size multiplier for labels.');
 
     imgui.Spacing();
     sub_header('Sizing');
@@ -424,19 +451,21 @@ local function render_cat_labels()
     end
     tip('How far above the dots the label floats.');
 
-    c = imgui.SliderFloat('Min Zoom', B.d3d_text_min_scale, 0.1, 2.0, '%.1f');
-    if (c) then
-        changed = true;
-        renderer.d3d_text_min_scale = B.d3d_text_min_scale[1];
-    end
-    tip('Minimum font scale when far away.');
+    if (B.d3d_label_type_idx[1] ~= 1) then
+        c = imgui.SliderFloat('Min Zoom', B.d3d_text_min_scale, 0.1, 2.0, '%.1f');
+        if (c) then
+            changed = true;
+            renderer.d3d_text_min_scale = B.d3d_text_min_scale[1];
+        end
+        tip('Minimum font scale when far away.');
 
-    c = imgui.SliderFloat('Max Zoom', B.d3d_text_max_scale, 1.0, 10.0, '%.1f');
-    if (c) then
-        changed = true;
-        renderer.d3d_text_max_scale = B.d3d_text_max_scale[1];
+        c = imgui.SliderFloat('Max Zoom', B.d3d_text_max_scale, 1.0, 10.0, '%.1f');
+        if (c) then
+            changed = true;
+            renderer.d3d_text_max_scale = B.d3d_text_max_scale[1];
+        end
+        tip('Maximum font scale when close up.');
     end
-    tip('Maximum font scale when close up.');
 
     if (changed) then
         sync_to_settings();

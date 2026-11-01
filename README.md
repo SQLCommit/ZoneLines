@@ -39,7 +39,7 @@ The main file should be at `/ashita/addons/zonelines/zonelines.lua`.
 | :--- | :--- |
 | **Zone boundaries** | Markers for 846 zone lines across 198 zones, plus supplemental transitions. |
 | **World markers** | Terrain-following dots, portal circles, and poles hidden by walls and terrain. |
-| **Destination labels** | Zone names and distance with adjustable fonts, outlines, and placement. |
+| **Destination labels** | Zone names and distance with adjustable fonts, outlines, and placement, shown flat on screen or as upright signs along the marker line. |
 | **Appearance** | Change marker size, pulse, distance colors, and distance fade. |
 | **Individual adjustments** | Change height, trim, flattening, visibility, and pole height for a specific zone line. |
 
@@ -50,6 +50,8 @@ Open `/zl` to adjust markers and labels. `/zl show` and `/zl hide` control the m
 **Reading the markers:** Dotted lines follow passage boundaries; circles and poles mark portals and other triggers. Distance is measured to the nearest boundary edge. Walls and terrain hide markers behind them.
 
 **Fine-tuning:** Use **Zone Lines** and **Overrides** to adjust individual entries. Resetting general settings keeps these adjustments. Marker positions use bundled zone and terrain data, so coverage depends on the included entries.
+
+**Label type:** **Screen** labels always face the camera and scale with distance. **In-World Sign** stands each label upright along its dotted line with real perspective, readable from either side; **Sign Height** sets its size in yalms. Portal labels always use Screen.
 
 **Fonts:** Built-in Windows fonts are available in the label font picker. To use a bundled or custom font, install it in Windows and fully restart FFXI. Custom font files also belong in `/ashita/addons/zonelines/fonts/`. An addon reload alone is not enough. See [Font setup](FONTS.md).
 

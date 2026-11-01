@@ -47,6 +47,8 @@ local default_settings = T{
     d3d_show_distance    = true,
     d3d_dist_position    = 'bottom',  -- 'bottom', 'top', 'left', 'right'
     d3d_label_spacing    = 8,         -- extra pixel gap between name and distance
+    d3d_label_type       = 'screen',  -- 'screen' = flat on screen, 'world' = upright sign along the dots
+    d3d_sign_height      = 0.4,       -- world sign line height (yalms)
     dot_glow_enabled     = true,      -- pulsating dots
     dot_glow_speed       = 4.0,       -- pulse speed (radians/sec)
     dot_glow_intensity   = 2.0,       -- glow brightness multiplier
@@ -147,6 +149,8 @@ local function sync_renderer(settings_ref)
     renderer.d3d_show_distance  = (settings_ref.d3d_show_distance ~= false);
     renderer.d3d_dist_position  = settings_ref.d3d_dist_position or default_settings.d3d_dist_position;
     renderer.d3d_label_spacing  = settings_ref.d3d_label_spacing or default_settings.d3d_label_spacing;
+    renderer.d3d_world_labels   = (settings_ref.d3d_label_type == 'world');
+    renderer.d3d_sign_height    = settings_ref.d3d_sign_height or default_settings.d3d_sign_height;
     renderer.dot_glow_enabled   = (settings_ref.dot_glow_enabled ~= false);
     renderer.dot_glow_speed     = settings_ref.dot_glow_speed or default_settings.dot_glow_speed;
     renderer.dot_glow_intensity = settings_ref.dot_glow_intensity or default_settings.dot_glow_intensity;

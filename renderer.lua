@@ -135,6 +135,8 @@ renderer.d3d_show_labels   = true;
 renderer.d3d_show_distance = true;
 renderer.d3d_dist_position = 'bottom';  -- 'bottom', 'top', 'left', 'right'
 renderer.d3d_label_spacing = 2;         -- extra pixel gap between name and distance
+renderer.d3d_world_labels  = false;     -- curtain labels drawn as upright signs along the dot line
+renderer.d3d_sign_height   = 0.4;       -- world-label line height (yalms)
 renderer.dot_glow_enabled   = true;     -- pulsating dots
 renderer.dot_glow_speed     = 2.0;      -- pulse speed (radians/sec)
 renderer.dot_glow_intensity = 0.5;      -- glow brightness multiplier
@@ -574,7 +576,14 @@ local function compute_curtain_positions(wx, wy, wz, half_sx, half_sy, half_sz,
     local label_wx = wx + label_lx * cos_r - label_lz * sin_r;
     local label_wz = wz + label_lx * sin_r + label_lz * cos_r;
 
-    local result = { positions = positions, hover_y = label_hover_y, label_x = label_wx, label_z = label_wz };
+    -- Unit vector along the dot line (world XZ)
+    local edge_lx, edge_lz = 0, 1;
+    if (along_x) then edge_lx, edge_lz = 1, 0; end
+    local edge_x = edge_lx * cos_r - edge_lz * sin_r;
+    local edge_z = edge_lx * sin_r + edge_lz * cos_r;
+
+    local result = { positions = positions, hover_y = label_hover_y, label_x = label_wx, label_z = label_wz,
+                     edge_x = edge_x, edge_z = edge_z };
     if (rect_id ~= nil) then
         curtain_cache[rect_id] = { sign = depth_sign, rev = settings_rev, data = result };
     end
@@ -902,6 +911,128 @@ local function draw_label_tex(device, tex, w, h, x, y, z)
     device:DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2, text_verts, TEXTURED_VERTEX_SIZE);
 end
 
+-- Draw one gdifonts texture as an upright world quad. (ax,ay,az) = anchor, (ex,ez) = unit
+-- direction text reads along, (ox,oy) = top-left offset from the anchor. FFXI world Y points down.
+local function draw_label_world(device, tex, ax, ay, az, ex, ez, ox, oy, w, h)
+    local x0 = ax + ex * ox;
+    local z0 = az + ez * ox;
+    local x1 = x0 + ex * w;
+    local z1 = z0 + ez * w;
+    local y0 = ay + oy;
+    local y1 = y0 + h;
+    local col = 0xFFFFFFFF;
+    local v = text_verts;
+    v[0].x=x0; v[0].y=y0; v[0].z=z0; v[0].color=col; v[0].tu=0.0; v[0].tv=0.0;
+    v[1].x=x1; v[1].y=y0; v[1].z=z1; v[1].color=col; v[1].tu=1.0; v[1].tv=0.0;
+    v[2].x=x0; v[2].y=y1; v[2].z=z0; v[2].color=col; v[2].tu=0.0; v[2].tv=1.0;
+    v[3].x=x1; v[3].y=y0; v[3].z=z1; v[3].color=col; v[3].tu=1.0; v[3].tv=0.0;
+    v[4].x=x1; v[4].y=y1; v[4].z=z1; v[4].color=col; v[4].tu=1.0; v[4].tv=1.0;
+    v[5].x=x0; v[5].y=y1; v[5].z=z0; v[5].color=col; v[5].tu=0.0; v[5].tv=1.0;
+    device:SetTexture(0, ffi.cast('IDirect3DBaseTexture8*', tex));
+    device:DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2, text_verts, TEXTURED_VERTEX_SIZE);
+end
+
+-- Name/distance textures and their sizes at q units per texture pixel.
+local function label_textures(lbl, dpos, q)
+    local dist_text = lbl.dist_text;
+    if (dist_text ~= nil) then
+        if (dpos == 'right') then
+            dist_text = '- ' .. dist_text;
+        elseif (dpos == 'left') then
+            dist_text = dist_text .. ' -';
+        end
+    end
+    local name_tex, name_tw, name_th = nil, 0, 0;
+    if (lbl.name ~= nil) then
+        local rect;
+        name_tex, rect = gdi_get(lbl.name);
+        if (rect ~= nil) then name_tw = rect.right * q; name_th = rect.bottom * q; end
+    end
+    local dist_tex, dist_tw, dist_th = nil, 0, 0;
+    if (dist_text ~= nil) then
+        local rect;
+        dist_tex, rect = gdi_get(dist_text);
+        if (rect ~= nil) then dist_tw = rect.right * q; dist_th = rect.bottom * q; end
+    end
+    return name_tex, name_tw, name_th, dist_tex, dist_tw, dist_th;
+end
+
+-- Top-left offsets of the name and distance quads from the label anchor (Y down).
+-- Bottom-anchored: text grows upward from the anchor so it never collides with the dots.
+-- A nil Y means that part isn't drawn.
+local function label_layout(dpos, has_name, has_dist, name_tw, dist_tw, line_height, spacing)
+    local ny, dy;
+    if (dpos == 'bottom') then
+        if (has_name and has_dist) then
+            dy = -line_height;
+            ny = -2 * line_height - spacing;
+        elseif (has_dist) then
+            dy = -line_height;
+        else
+            ny = -line_height;
+        end
+    elseif (dpos == 'top') then
+        if (has_name and has_dist) then
+            ny = -line_height;
+            dy = -2 * line_height - spacing;
+        elseif (has_dist) then
+            dy = -line_height;
+        else
+            ny = -line_height;
+        end
+    elseif (dpos == 'left' or dpos == 'right') then
+        ny = -line_height;
+        dy = -line_height;
+    end
+
+    local nx = -name_tw / 2;
+    local dx;
+    if (dpos == 'right') then
+        dx = name_tw / 2 + spacing;
+    elseif (dpos == 'left') then
+        dx = -name_tw / 2 - dist_tw - spacing;
+    else
+        dx = -dist_tw / 2;
+    end
+    return nx, ny, dx, dy;
+end
+
+-- Labels carrying an edge direction, drawn under the game's own view/projection.
+local function draw_world_labels(device, view)
+    local dpos = renderer.d3d_dist_position or 'bottom';
+    local spacing_px = renderer.d3d_label_spacing or 2;
+
+    -- Camera world position (inverse of the view matrix's rotation + translation)
+    local tx, ty, tz = view._41, view._42, view._43;
+    local cam_x = -(tx * view._11 + ty * view._12 + tz * view._13);
+    local cam_z = -(tx * view._31 + ty * view._32 + tz * view._33);
+    -- Winding of camera-right vs camera-forward in XZ; the sign is the world's handedness.
+    -- FFXI's view is right-handed: forward is -(_13, _33), not +.
+    local hand = view._31 * view._13 - view._11 * view._33;
+
+    for li = 1, frame_labels_n do
+        local lbl = frame_labels[li];
+        if (lbl.ex ~= nil and lbl.x ~= nil and lbl.y ~= nil and lbl.z ~= nil) then
+            local ex, ez = lbl.ex, lbl.ez;
+            -- Flip by which side of the sign the camera is on, so the text reads left-to-right from there
+            local fx, fz = lbl.x - cam_x, lbl.z - cam_z;
+            if ((ex * fz - ez * fx) * hand < 0) then ex = -ex; ez = -ez; end
+            local line_height = (renderer.d3d_sign_height or 0.4) * (lbl.fade or 1.0);
+            local q = line_height / GDI_FONT_HEIGHT;
+            local spacing = spacing_px * line_height / 14;  -- spacing is in px of a 14px line
+            local name_tex, name_tw, name_th, dist_tex, dist_tw, dist_th = label_textures(lbl, dpos, q);
+            local nx, ny, dx, dy = label_layout(dpos, lbl.name ~= nil, lbl.dist_text ~= nil,
+                name_tw, dist_tw, line_height, spacing);
+            if (name_tex ~= nil and ny ~= nil) then
+                draw_label_world(device, name_tex, lbl.x, lbl.y, lbl.z, ex, ez, nx, ny, name_tw, name_th);
+            end
+            if (dist_tex ~= nil and dy ~= nil) then
+                draw_label_world(device, dist_tex, lbl.x, lbl.y, lbl.z, ex, ez, dx, dy, dist_tw, dist_th);
+            end
+        end
+    end
+end
+
 local function draw_text_pass(device, view, text_scale)
     local vp_w = renderer.cached_vp_w;
     local vp_h = renderer.cached_vp_h;
@@ -936,6 +1067,13 @@ local function draw_text_pass(device, view, text_scale)
     device:SetRenderState(D3DRS_ALPHAREF, 0x80);   -- cut faint white-on-transparent edge bleed
     device:SetRenderState(D3DRS_ALPHAFUNC, D3DCMP_GREATEREQUAL);
 
+    -- World labels must draw before the ortho transforms below replace the game's view/projection
+    local world_mode = (renderer.d3d_world_labels == true);
+    if (world_mode) then
+        device:SetTransform(D3DTS_WORLD, identity_matrix);
+        draw_world_labels(device, view);
+    end
+
     -- Set up ortho projection: screen pixels map 1:1, Z passes through for depth
     device:SetTransform(D3DTS_WORLD, identity_matrix);
     device:SetTransform(2, identity_matrix);  -- view = identity
@@ -958,7 +1096,7 @@ local function draw_text_pass(device, view, text_scale)
     for li = 1, frame_labels_n do
         local lbl = frame_labels[li];
         if (lbl.x ~= nil and lbl.y ~= nil and lbl.z ~= nil
-            and lbl.dist ~= nil) then
+            and lbl.dist ~= nil and not (world_mode and lbl.ex ~= nil)) then
             local r1, r2, r3, r4 = project_with_z(
                 view, cached_proj, vp_w, vp_h,
                 lbl.x, lbl.y, lbl.z);
@@ -979,76 +1117,15 @@ local function draw_text_pass(device, view, text_scale)
                 local dpos = renderer.d3d_dist_position or 'bottom';
                 local spacing = renderer.d3d_label_spacing or 2;
 
-                -- Add separator for left/right positioning
-                local draw_dist_text = lbl.dist_text;
-                if (lbl.dist_text ~= nil) then
-                    if (dpos == 'right') then
-                        draw_dist_text = '- ' .. lbl.dist_text;
-                    elseif (dpos == 'left') then
-                        draw_dist_text = lbl.dist_text .. ' -';
-                    end
-                end
-
-                local name_tex, name_rect = nil, nil;
-                local name_tw, name_th = 0, 0;
-                if (lbl.name ~= nil) then
-                    name_tex, name_rect = gdi_get(lbl.name);
-                    if (name_rect ~= nil) then name_tw = name_rect.right * q; name_th = name_rect.bottom * q; end
-                end
-                local dist_tex, dist_rect = nil, nil;
-                local dist_tw, dist_th = 0, 0;
-                if (draw_dist_text ~= nil) then
-                    dist_tex, dist_rect = gdi_get(draw_dist_text);
-                    if (dist_rect ~= nil) then dist_tw = dist_rect.right * q; dist_th = dist_rect.bottom * q; end
-                end
-
-                -- Bottom-anchored: text grows UPWARD from sy (label anchor just
-                -- above the dots) so close-range scaling doesn't collide with them.
-
-                local has_both = (lbl.name ~= nil and draw_dist_text ~= nil);
-
-                local ny, nx;  -- name position
-                local dx, dy;  -- distance position
-
-                if (dpos == 'bottom') then
-                    if (has_both) then
-                        dy = sy - line_height;
-                        ny = sy - 2 * line_height - spacing;
-                    elseif (draw_dist_text ~= nil) then
-                        dy = sy - line_height;
-                    else
-                        ny = sy - line_height;
-                    end
-                elseif (dpos == 'top') then
-                    if (has_both) then
-                        ny = sy - line_height;
-                        dy = sy - 2 * line_height - spacing;
-                    elseif (draw_dist_text ~= nil) then
-                        dy = sy - line_height;
-                    else
-                        ny = sy - line_height;
-                    end
-                elseif (dpos == 'left' or dpos == 'right') then
-                    ny = sy - line_height;
-                    dy = sy - line_height;
-                end
+                local name_tex, name_tw, name_th, dist_tex, dist_tw, dist_th = label_textures(lbl, dpos, q);
+                local nx, ny, dx, dy = label_layout(dpos, lbl.name ~= nil, lbl.dist_text ~= nil,
+                    name_tw, dist_tw, line_height, spacing);
 
                 if (name_tex ~= nil and ny ~= nil) then
-                    nx = sx - name_tw / 2;
-                    draw_label_tex(device, name_tex, name_tw, name_th, nx, ny, ndcz);
+                    draw_label_tex(device, name_tex, name_tw, name_th, sx + nx, sy + ny, ndcz);
                 end
-
                 if (dist_tex ~= nil and dy ~= nil) then
-                    if (dpos == 'bottom' or dpos == 'top') then
-                        dx = sx - dist_tw / 2;
-                    elseif (dpos == 'right') then
-                        dx = sx + name_tw / 2 + spacing;
-                    elseif (dpos == 'left') then
-                        dx = sx - name_tw / 2 - dist_tw - spacing;
-                    else
-                        dx = sx - dist_tw / 2;
-                    end
-                    draw_label_tex(device, dist_tex, dist_tw, dist_th, dx, dy, ndcz);
+                    draw_label_tex(device, dist_tex, dist_tw, dist_th, sx + dx, sy + dy, ndcz);
                 end
             end
         end
@@ -1202,6 +1279,7 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
                 local label_y = zl.y;
                 local label_x = zl.x;
                 local label_z = zl.z;
+                local edge_x, edge_z = nil, nil;  -- set for curtains only
                 -- Display distance measures to nearest box edge, not center
                 local display_dist = distance_to_zoneline(player_x, player_z, zl);
 
@@ -1236,6 +1314,8 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
                     label_y = cdata.hover_y;
                     label_x = cdata.label_x;
                     label_z = cdata.label_z;
+                    edge_x = cdata.edge_x;
+                    edge_z = cdata.edge_z;
                     local dot_sz = D3D_DOT_GLOW_SIZE * glow_size_mult * fade;
                     draw_d3d_style_dots(device, cdata, rx, ry, rz, ux, uy, uz, core_col, glow_col, dot_sz);
                 else
@@ -1278,6 +1358,7 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
                     lbl.x = label_x; lbl.y = text_y; lbl.z = label_z;
                     lbl.name = name; lbl.dist_text = dist_text; lbl.dist = display_dist;
                     lbl.fade = fade;
+                    lbl.ex = edge_x; lbl.ez = edge_z;
                 end
             end
         end
