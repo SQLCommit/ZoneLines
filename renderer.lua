@@ -747,6 +747,10 @@ end
 renderer.gdi_font_family   = 'Arial';
 renderer.gdi_outline_width = 2;     -- label outline thickness (px at render res)
 renderer.gdi_bold          = true;  -- bold label text
+renderer.gdi_text_color     = { 1.0, 1.0, 1.0 };
+renderer.gdi_gradient_style = 0;    -- gdifonts Gradient enum (0 = none)
+renderer.gdi_gradient_color = { 1.0, 1.0, 1.0 };
+renderer.gdi_outline_color  = { 0.0, 0.0, 0.0 };
 
 -- Offer common Windows fonts and installed bundled fonts. Never install fonts or modify the registry.
 local COMMON_FONTS = { 'Arial', 'Calibri', 'Segoe UI', 'Consolas', 'Verdana', 'Tahoma', 'Trebuchet MS', 'Times New Roman' };
@@ -843,9 +847,12 @@ local function gdi_get(text)
                 font_family   = renderer.gdi_font_family or 'Arial',
                 font_height   = GDI_FONT_HEIGHT,
                 font_flags    = (renderer.gdi_bold ~= false) and 1 or 0,
-                font_color    = 0xFFFFFFFF,
-                outline_color = 0xFF000000,
-                outline_width = renderer.gdi_outline_width or 2,
+                -- Opaque only: the text pass alpha-tests at 0x80, so translucent colors get cut.
+                font_color     = rgb_to_argb(renderer.gdi_text_color or { 1, 1, 1 }, 0xFF),
+                gradient_style = renderer.gdi_gradient_style or 0,
+                gradient_color = rgb_to_argb(renderer.gdi_gradient_color or { 1, 1, 1 }, 0xFF),
+                outline_color  = rgb_to_argb(renderer.gdi_outline_color or { 0, 0, 0 }, 0xFF),
+                outline_width  = renderer.gdi_outline_width or 2,
                 text          = text,
             }, true);  -- manual = not added to gdifonts' own 2D auto-render
         end);

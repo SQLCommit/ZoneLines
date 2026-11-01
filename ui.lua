@@ -42,6 +42,10 @@ local B = {
     d3d_font_idx         = { 0 },
     d3d_outline_width    = { 2.0 },
     d3d_bold             = { true },
+    d3d_text_color       = { 1.0, 1.0, 1.0 },
+    d3d_gradient_idx     = { 0 },
+    d3d_gradient_color   = { 1.0, 1.0, 1.0 },
+    d3d_outline_color    = { 0.0, 0.0, 0.0 },
     d3d_label_spacing    = { 2 },
     dot_glow_enabled     = { true },
     dot_glow_speed       = { 2.0 },
@@ -59,6 +63,10 @@ local B = {
 
 local DIST_POS_NAMES = 'Bottom\0Top\0Left\0Right\0';
 local DIST_POS_VALUES = { 'bottom', 'top', 'left', 'right' };
+
+-- Combo index == gdifonts Gradient enum value.
+local GRADIENT_NAMES = 'None\0Left to Right\0Top-Left to Bottom-Right\0Top to Bottom\0Top-Right to Bottom-Left\0'
+    .. 'Right to Left\0Bottom-Right to Top-Left\0Bottom to Top\0Bottom-Left to Top-Right\0';
 
 -- Map picker indices to common Windows fonts and installed fonts from fonts/.
 local function font_values()
@@ -114,6 +122,10 @@ local function sync_renderer_fields()
     renderer.gdi_font_family    = font_values()[B.d3d_font_idx[1] + 1] or 'Arial';
     renderer.gdi_outline_width  = B.d3d_outline_width[1];
     renderer.gdi_bold           = B.d3d_bold[1];
+    renderer.gdi_text_color     = B.d3d_text_color;
+    renderer.gdi_gradient_style = B.d3d_gradient_idx[1];
+    renderer.gdi_gradient_color = B.d3d_gradient_color;
+    renderer.gdi_outline_color  = B.d3d_outline_color;
     renderer.d3d_label_spacing  = B.d3d_label_spacing[1];
     renderer.d3d_text_scale     = B.d3d_text_scale[1];
     renderer.d3d_label_offset   = B.d3d_label_offset[1];
@@ -157,6 +169,13 @@ local function sync_from_settings()
     B.d3d_font_idx[1] = fidx;
     B.d3d_outline_width[1] = settings_ref.d3d_outline_width or defaults_ref.d3d_outline_width;
     B.d3d_bold[1] = (settings_ref.d3d_bold ~= false);
+    local tc = settings_ref.d3d_text_color or defaults_ref.d3d_text_color;
+    B.d3d_text_color[1] = tc[1] or 1; B.d3d_text_color[2] = tc[2] or 1; B.d3d_text_color[3] = tc[3] or 1;
+    B.d3d_gradient_idx[1] = settings_ref.d3d_gradient_style or defaults_ref.d3d_gradient_style;
+    local gc = settings_ref.d3d_gradient_color or defaults_ref.d3d_gradient_color;
+    B.d3d_gradient_color[1] = gc[1] or 1; B.d3d_gradient_color[2] = gc[2] or 1; B.d3d_gradient_color[3] = gc[3] or 1;
+    local oc = settings_ref.d3d_outline_color or defaults_ref.d3d_outline_color;
+    B.d3d_outline_color[1] = oc[1] or 0; B.d3d_outline_color[2] = oc[2] or 0; B.d3d_outline_color[3] = oc[3] or 0;
     local dp = settings_ref.d3d_dist_position or defaults_ref.d3d_dist_position;
     for i = 1, #DIST_POS_VALUES do
         if (DIST_POS_VALUES[i] == dp) then B.d3d_dist_pos_idx[1] = i - 1; break; end
@@ -214,6 +233,10 @@ local function sync_to_settings()
     settings_ref.d3d_font_family    = font_values()[B.d3d_font_idx[1] + 1] or 'Arial';
     settings_ref.d3d_outline_width  = B.d3d_outline_width[1];
     settings_ref.d3d_bold           = B.d3d_bold[1];
+    settings_ref.d3d_text_color     = T{ B.d3d_text_color[1], B.d3d_text_color[2], B.d3d_text_color[3] };
+    settings_ref.d3d_gradient_style = B.d3d_gradient_idx[1];
+    settings_ref.d3d_gradient_color = T{ B.d3d_gradient_color[1], B.d3d_gradient_color[2], B.d3d_gradient_color[3] };
+    settings_ref.d3d_outline_color  = T{ B.d3d_outline_color[1], B.d3d_outline_color[2], B.d3d_outline_color[3] };
     settings_ref.d3d_label_spacing  = B.d3d_label_spacing[1];
     settings_ref.dot_glow_enabled   = B.dot_glow_enabled[1];
     settings_ref.dot_glow_speed     = B.dot_glow_speed[1];
@@ -405,7 +428,7 @@ local function render_cat_labels()
         renderer.gdi_outline_width = B.d3d_outline_width[1];
         pcall(renderer.cleanup_gdi);
     end
-    tip('Black outline thickness around label text.');
+    tip('Outline thickness around label text.');
 
     c = imgui.SliderFloat('Font Size', B.d3d_text_scale, 0.3, 3.0, '%.1f');
     if (c) then
@@ -413,6 +436,44 @@ local function render_cat_labels()
         renderer.d3d_text_scale = B.d3d_text_scale[1];
     end
     tip('Base font size multiplier for labels.');
+
+    imgui.Spacing();
+    sub_header('Style');
+
+    c = imgui.ColorEdit3('Text Color', B.d3d_text_color);
+    if (c) then
+        changed = true;
+        renderer.gdi_text_color = B.d3d_text_color;
+        pcall(renderer.cleanup_gdi);
+    end
+    tip('Label text color. With a gradient, this is the starting color.');
+
+    imgui.PushItemWidth(200);
+    if (imgui.Combo('Gradient##gradstyle', B.d3d_gradient_idx, GRADIENT_NAMES)) then
+        changed = true;
+        renderer.gdi_gradient_style = B.d3d_gradient_idx[1];
+        pcall(renderer.cleanup_gdi);
+    end
+    imgui.PopItemWidth();
+    tip('Fade direction from Text Color to Gradient Color.');
+
+    if (B.d3d_gradient_idx[1] ~= 0) then
+        c = imgui.ColorEdit3('Gradient Color', B.d3d_gradient_color);
+        if (c) then
+            changed = true;
+            renderer.gdi_gradient_color = B.d3d_gradient_color;
+            pcall(renderer.cleanup_gdi);
+        end
+        tip('Color the gradient fades to.');
+    end
+
+    c = imgui.ColorEdit3('Outline Color', B.d3d_outline_color);
+    if (c) then
+        changed = true;
+        renderer.gdi_outline_color = B.d3d_outline_color;
+        pcall(renderer.cleanup_gdi);
+    end
+    tip('Label outline color.');
 
     imgui.Spacing();
     sub_header('Sizing');
@@ -777,6 +838,7 @@ function ui.render(zone_id, zone_name)
                 end
                 sync_from_settings();
                 sync_renderer_fields();
+                pcall(renderer.cleanup_gdi);
                 ui.settings_dirty = true;
             end
             tip('Reset all settings to defaults. Your per-zone-line overrides are kept.');
