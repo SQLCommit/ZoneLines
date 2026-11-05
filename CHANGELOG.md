@@ -2,6 +2,33 @@
 
 [Back to ZoneLines](README.md)
 
+## v1.4.0
+
+### Added
+
+- Ship-time signs at every dock and in the Port Jeuno arches, with times over the schedule NPCs.
+- Markers for Windurst teleporters, Delkfutt's Tower telepads, Outpost Warp NPCs, and Aht Urhgan warp NPCs.
+- Conquest crests beside destination names.
+- Exits, portals, docks, and ship times on the native `/map`.
+- Line effects: pulse, wave, reveal, and rising motes.
+- Fixed labels that stand in the world like signs.
+- Portal and NPC marker switches that keep the labels.
+- Fonts load from the `fonts/` folder with no install.
+
+### Improved
+
+- Settings regrouped into five tabs, with per-tab Reset buttons.
+- Per-marker adjustments for portals, NPCs, and signs.
+- Less work and garbage per frame.
+
+### Fixed
+
+- Wide zone lines stay visible at their ends.
+- Built-in line adjustments can be cleared; your own changes are kept.
+- Pulse brightness settings now apply.
+- Errors go to `logs\zonelines.log` with one line in chat; a failing part retries, then stops.
+- Old unused settings are removed.
+
 ## v1.3.1
 
 ### Fixed
@@ -22,7 +49,7 @@
 - Cached terrain-following marker positions instead of rebuilding them every frame.
 - Separated font controls from label sizing settings.
 - Reset to Defaults preserves individual zone-line adjustments; reload refreshes addon modules.
-- Consolidated defaults and removed the obsolete text-outline toggle from saved settings.
+- Removed the obsolete text-outline toggle from saved settings. Other old keys stayed until the next release.
 
 ### Fixed
 

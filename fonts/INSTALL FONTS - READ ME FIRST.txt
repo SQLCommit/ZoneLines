@@ -1,13 +1,8 @@
-ZoneLines - Optional label fonts
+ZoneLines - Label fonts
 
-1. Right-click a bundled .ttf file and choose Install in Windows.
-2. Fully close and restart FFXI. An addon reload is not enough.
-3. Open /zl and choose Labels > Fonts > Font.
+1. Put a .ttf or .otf file in this folder.
+2. In game, open /zl and go to Labels > Text.
+3. Press Rescan fonts folder, then choose the font under Font.
 
-For a custom font, first put its .ttf or .otf file in this folder,
-then follow the same steps. ZoneLines does not install fonts for you.
-
-Bundled options: Grammara, Mystic Gate, and Oswald.
-Common Windows fonts in the picker need no extra installation.
-
-See ../FONTS.md for the full instructions.
+Nothing is installed in Windows and no restart is needed.
+Bundled: Grammara, Mystic Gate, and Oswald.

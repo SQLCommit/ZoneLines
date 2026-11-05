@@ -30,8 +30,10 @@ local default_settings = {
     text = '',
 };
 
+local font_data = nil;   -- one shared struct; CreateTexture reads it at once
 local function CreateFontData(settings)
-    local data = ffi.new('GdiFontData_t');
+    if (font_data == nil) then font_data = ffi.new('GdiFontData_t'); end
+    local data = font_data;
     data.BoxHeight = settings.box_height;
     data.BoxWidth = settings.box_width;
     data.FontHeight = settings.font_height;
@@ -48,15 +50,25 @@ end
 
 local object = {};
 
+-- Release the old texture now, not at GC.
+local function release_texture(self)
+    local old = self.texture;
+    self.texture = nil;
+    if (old ~= nil) then
+        ffi.gc(old, nil);
+        old:Release();
+    end
+end
+
 function object:destroy()
     self.rect = nil;
-    self.texture = nil;
+    release_texture(self);
 end
 
 function object:get_texture()
     if (self.is_dirty == true) then
         self.is_dirty = false;
-        self.texture = nil;
+        release_texture(self);
         self.rect = nil;
         if (self.settings.text == '') then
             return;

@@ -21,6 +21,8 @@ __pycache__/
 *.png
 *.jpg
 *.jpeg
+!/crests/*.png
+!/signs/*.png
 Thumbs.db
 desktop.ini
 .DS_Store

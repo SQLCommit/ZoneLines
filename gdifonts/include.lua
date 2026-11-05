@@ -43,6 +43,7 @@ ffi.cdef[[
     void DestroyFontManager(uint32_t* pManager);
     GdiFontReturn_t CreateTexture(uint32_t* pManager, GdiFontData_t* data);
     bool GetFontAvailable(const char* font);
+    int AddPrivateFont(const char* path, char* family, int familySize);
 ]]
 
 local interface = renderer.CreateFontManager(d3d.get_device());
@@ -154,6 +155,14 @@ end
 
 function exports:get_font_available(fontName)
     return renderer.GetFontAvailable(fontName);
+end
+
+-- Load a font file for this game only; returns its family name, or nil (older DLL: no export).
+local fambuf = ffi.new('char[256]');
+function exports:add_font(path)
+    local ok, n = pcall(function() return renderer.AddPrivateFont(path, fambuf, 256); end);
+    if (not ok or n ~= 1) then return nil; end
+    return ffi.string(fambuf);
 end
 
 function exports:render()

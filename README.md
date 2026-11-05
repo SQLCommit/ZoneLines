@@ -17,7 +17,7 @@
 ---
 
 <p align="center">
-ZoneLines marks zone transitions in the game world, with destination names and distances so you can see where a passage or portal leads.
+ZoneLines marks zone transitions in the game world, with destination names and distances so you can see where a passage or portal leads. It also shows ship times at every dock and marks exits on the native map.
 </p>
 
 ## ![Install](https://readme-typing-svg.demolab.com/?font=Cinzel&size=25&duration=1&pause=0&color=638EBD&center=false&vCenter=true&repeat=false&width=600&height=42&lines=Install&letterSpacing=0.5px&weight=700)
@@ -38,20 +38,29 @@ The main file should be at `/ashita/addons/zonelines/zonelines.lua`.
 | Feature | What you can see and do |
 | :--- | :--- |
 | **Zone boundaries** | Markers for 846 zone lines across 198 zones, plus supplemental transitions. |
-| **World markers** | Terrain-following dots, portal circles, and poles hidden by walls and terrain. |
-| **Destination labels** | Zone names and distance with adjustable fonts, outlines, and placement. |
-| **Appearance** | Change marker size, pulse, distance colors, and distance fade. |
-| **Individual adjustments** | Change height, trim, flattening, visibility, and pole height for a specific zone line. |
+| **World markers** | Terrain-following dots, portal circles and poles, and gems over warp NPCs, hidden by walls and terrain. |
+| **Portals** | Windurst teleporters, Outpost Warp and Aht Urhgan warp NPCs, and Delkfutt's Tower telepads, with destinations and floors. |
+| **Ship times** | Signboards at every airship, ferry, barge, and manaclipper dock and in the Port Jeuno arches, plus times above the schedule NPCs. |
+| **Native map** | Exits, portals, docks, and ship times on the game's `/map`, for the floor you are viewing. |
+| **Destination labels** | Zone names, distance, and the destination's conquest crest, with adjustable fonts, outlines, and placement. |
+| **Effects** | Pulse, travelling wave, draw-in reveal, and rising motes, each with its own controls. |
+| **Individual adjustments** | Hide or adjust any zone line, portal, sign, or schedule NPC in this zone. |
 
 ## ![Using ZoneLines](https://readme-typing-svg.demolab.com/?font=Cinzel&size=25&duration=1&pause=0&color=638EBD&center=false&vCenter=true&repeat=false&width=600&height=42&lines=Using+ZoneLines&letterSpacing=0.5px&weight=700)
 
 Open `/zl` to adjust markers and labels. `/zl show` and `/zl hide` control the markers themselves.
 
-**Reading the markers:** Dotted lines follow passage boundaries; circles and poles mark portals and other triggers. Distance is measured to the nearest boundary edge. Walls and terrain hide markers behind them.
+**Reading the markers:** Dotted lines follow passage boundaries; circles and poles mark portals and other triggers, and a small gem marks warp NPCs. Distance is measured to the nearest boundary edge. Walls and terrain hide markers behind them. **Lines → Markers** turns the portal and NPC markers off and keeps their labels. Labels turn to face the camera, or tick **Labels → Placement → Fixed in the world** to stand them in place like signs.
 
-**Fine-tuning:** Use **Zone Lines** and **Overrides** to adjust individual entries. Resetting general settings keeps these adjustments. Marker positions use bundled zone and terrain data, so coverage depends on the included entries.
+**Settings tabs:** **Lines** (dots, colour, effects, distance), **Labels**, **Travel** (docks, signs, NPC times), **Map**, and **This Zone**. The sidebar has one switch each for Zone lines, Portals, Travel, and the Map. Lines, Labels, Travel, and Map each have a Reset button, and **Reset Everything** in the sidebar resets every tab.
 
-**Fonts:** Built-in Windows fonts are available in the label font picker. To use a bundled or custom font, install it in Windows and fully restart FFXI. Custom font files also belong in `/ashita/addons/zonelines/fonts/`. An addon reload alone is not enough. See [Font setup](FONTS.md).
+**Fine-tuning:** **This Zone** lists the zone's markers as Zone Lines, Portals, and Travel, each with its distance. Open one to hide it or adjust its height, trim, flattening, or pole height. Resetting general settings keeps these adjustments. Marker positions use bundled zone and terrain data, so coverage depends on the included entries.
+
+**Any server:** ZoneLines works on Phoenix, HorizonXI, and retail-style servers with no setup. Ship times run on the server's clock, and a ship seen at the dock fine-tunes its run. Conquest regions come from the game client. Warp NPCs that a server moved or removed hide once you stand at their usual spot, and NPCs a server added show once they appear. Aht Urhgan routes show only on characters with Treasures of Aht Urhgan.
+
+**Conquest crests:** ZoneLines asks the server for the conquest map once per weekly tally, the same request as opening `/rmap`.
+
+**Fonts:** The label font picker offers common Windows fonts plus every `.ttf` or `.otf` in `/ashita/addons/zonelines/fonts/`. Folder fonts load into the game only: nothing is installed in Windows and no restart is needed. Drop a file in, then press **Rescan fonts folder** under **Labels → Text**. A font is listed under its family name, which can differ from the file name. Replacing a font file with a new version needs a game restart.
 
 **Missing or misplaced markers:** Some transitions use supplemental entries rather than extracted zone data. [Open an issue](https://github.com/SQLCommit/ZoneLines/issues) with the zone, destination, and location if an entry needs attention.
 
@@ -71,6 +80,7 @@ Open `/zl` to adjust markers and labels. `/zl show` and `/zl hide` control the m
 
 - Settings and zone-line adjustments are saved per character.
 - **Files:** `/ashita/config/addons/zonelines/<CharName>_<ID>/settings.lua`
+- **Log:** `/ashita/logs/zonelines.log` records errors, newest kept. Add it to bug reports.
 - **Backup:** Copy `/ashita/config/addons/zonelines/` to keep your settings.
 
 ## ![Changelog](https://readme-typing-svg.demolab.com/?font=Cinzel&size=25&duration=1&pause=0&color=638EBD&center=false&vCenter=true&repeat=false&width=600&height=42&lines=Changelog&letterSpacing=0.5px&weight=700)
@@ -81,7 +91,7 @@ See the [changelog](CHANGELOG.md) for new features, improvements, and fixes in e
 
 ## ![Thanks and credits](https://readme-typing-svg.demolab.com/?font=Cinzel&size=25&duration=1&pause=0&color=638EBD&center=false&vCenter=true&repeat=false&width=600&height=42&lines=Thanks+and+credits&letterSpacing=0.5px&weight=700)
 
-- **Thorny** — GdiFonts, used to render destination labels.
+- **Thorny** — GdiFonts, used to render destination labels. ZoneLines ships a rebuild of its `gdifonttexture.dll` that adds loading fonts from the fonts folder.
 - **West Ronfaure** — The distance-fade suggestion and fixes for its fade curve and culling.
 - **The Ashita team** — atom0s, Thorny, and the [Ashita community](https://discord.gg/Ashita).
 
