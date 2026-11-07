@@ -9,6 +9,8 @@ local DAY = 86400;
 local REGION_AOB = '8B4C240433C00FBF14C5????????3BD1740B403D92000000';     -- Zone to region.
 local EXP_AOB    = '8B4C2404B801000000D3E08B0D????????8541147408854110';     -- Expansion check.
 local TOAU_BIT   = 0x8;
+local MOG_AOB    = '8BC852E8????????A3????????EB06891D????????A1????????C605????????01';   -- Mog House set.
+local MOG_AOB2   = '8B0D????????85C90F84????????E8????????84C0757EE8';                     -- Mog House test.
 
 local skew, skew_src = 0, 'built-in epoch';
 local region, region_src = nil, nil;
@@ -39,13 +41,36 @@ local function take_skew(v, src)
     return true;
 end
 
+local mog, mog_g = false, nil;
+
+-- Mog House object pointer.
+local function find_mog()
+    local a, b = find(MOG_AOB, 9), find(MOG_AOB2, 2);
+    if (a == nil or b == nil) then return 0, 'signature not found'; end
+    local g = u32(a);
+    if (g < 0x10000 or g ~= u32(b)) then return 0, 'signatures disagree'; end
+    return g, 'client';
+end
+
 -- Zone-in game time.
 function M.on_00a(data, now)
     if (type(data) ~= 'string' or #data < 0x40) then return; end
+    mog = (#data > 0x80 and data:byte(0x81) == 1);   -- Login state 1.
     local b1, b2, b3, b4 = data:byte(0x3D, 0x40);
     local gt = b1 + b2 * 256 + b3 * 65536 + b4 * 16777216;
     if (gt >= 1e8) then take_skew(gt - (now - EPOCH), 'zone-in packet'); end
     M.read_expansions();
+end
+
+-- Inside a Mog House.
+function M.in_mog()
+    if (mog) then return true; end
+    if (mog_g == nil) then
+        local ok, g, why = pcall(find_mog);
+        mog_g = (ok and g) or 0;
+        log('mog', 'mog house: ' .. ((mog_g ~= 0) and 'client' or ('zone-in only (' .. tostring(ok and why or g) .. ')')));
+    end
+    return mog_g ~= 0 and u32(mog_g) ~= 0;
 end
 
 -- Server clock offset.
@@ -120,6 +145,7 @@ end
 -- Test hook.
 function M.reset()
     skew, skew_src, region, region_src, toau_ok, exp_words = 0, 'built-in epoch', nil, nil, true, nil;
+    mog, mog_g = false, nil;
     logged = {};
 end
 

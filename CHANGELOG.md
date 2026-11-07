@@ -2,12 +2,20 @@
 
 [Back to ZoneLines](README.md)
 
+## v1.4.1
+
+### Fixed
+
+- Effects flickered or vanished when the game's background resolution matched the window size.
+- Markers from the city drawn inside the Mog House.
+
 ## v1.4.0
 
 ### Added
 
 - Ship-time signs at every dock and in the Port Jeuno arches, with times over the schedule NPCs.
 - Markers for Windurst teleporters, Delkfutt's Tower telepads, Outpost Warp NPCs, and Aht Urhgan warp NPCs.
+- One build for Phoenix, HorizonXI, and retail-style servers; ship times, conquest regions, and NPCs follow the server.
 - Conquest crests beside destination names.
 - Exits, portals, docks, and ship times on the native `/map`.
 - Line effects: pulse, wave, reveal, and rising motes.
@@ -24,8 +32,10 @@
 ### Fixed
 
 - Wide zone lines stay visible at their ends.
+- `/zl hide` and `/zl show` no longer revert.
 - Built-in line adjustments can be cleared; your own changes are kept.
 - Pulse brightness settings now apply.
+- Font changes apply at once after a reset.
 - Errors go to `logs\zonelines.log` with one line in chat; a failing part retries, then stops.
 - Old unused settings are removed.
 

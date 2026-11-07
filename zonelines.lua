@@ -2,7 +2,7 @@
 
 addon.name    = 'zonelines';
 addon.author  = 'SQLCommit';
-addon.version = '1.4.0';
+addon.version = '1.4.1';
 addon.desc    = 'Visualizes zone line boundaries with ground markers.';
 addon.link    = 'https://github.com/SQLCommit/zonelines';
 
@@ -395,7 +395,7 @@ local frame_no, zone_stamp, zone_cached = 0, -1, 0;
 
 local function draw_markers()
     if (s == nil or not s.visible) then return; end
-    if (zoning) then return; end
+    if (zoning or client.in_mog()) then return; end
 
     local zid = get_zone_id();
     zone_cached, zone_stamp = zid, frame_no;
@@ -446,7 +446,7 @@ local function update_window(fno)
 
     if (not zoning) then pcall(transport.observe, current_zone, os.time()); end
     ui.render(current_zone, zone_name);
-    if (s.visible and s.show_map_exits and not zoning) then
+    if (s.visible and s.show_map_exits and not zoning and not client.in_mog()) then
         mapoverlay.draw(current_zone, data.get_map_lines(current_zone), s);
     end
     if (ui.save_due()) then pcall(settings.save); end

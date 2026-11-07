@@ -25,13 +25,14 @@ local s_world, s_view, s_proj = ffi.new('D3DMATRIX'), ffi.new('D3DMATRIX'), ffi.
 local identity = ffi.new('D3DMATRIX');
 identity._11, identity._22, identity._33, identity._44 = 1, 1, 1, 1;
 
-local rt, ds = nil, nil;   -- World target refs.
+local rt, ds, bb = nil, nil, nil;   -- World target, screen refs.
 local world_w, world_h = 0, 0;
 local armed, busy, registered, warned = false, false, false, false;
 
 local function drop_refs()
     if (rt ~= nil) then rt.lpVtbl.Release(rt); rt = nil; end
     if (ds ~= nil) then ds.lpVtbl.Release(ds); ds = nil; end
+    if (bb ~= nil) then bb.lpVtbl.Release(bb); bb = nil; end
 end
 
 local function draw(dev, vt)
@@ -87,17 +88,29 @@ local function draw(dev, vt)
     if (not ok and not warned) then warned = true; textures.log('late draw: ' .. tostring(err)); end
 end
 
+local function fire(dev)
+    armed, busy = false, true;
+    draw(dev, dev.lpVtbl);
+    busy = false;
+    drop_refs();
+end
+
 local function on_dpup()
     if (not armed or busy) then return; end
     local dev = d3d8.get_device();
     if (dev == nil) then return; end
     local vt = dev.lpVtbl;
-    if (vt.GetViewport(dev, vp) ~= 0) then return; end
-    if (vp.Width == world_w and vp.Height == world_h) then return; end   -- Still the world.
-    armed, busy = false, true;
-    draw(dev, vt);
-    busy = false;
-    drop_refs();
+    if (bb ~= nil) then   -- Copy onto the screen.
+        if (vt.GetRenderTarget(dev, out_s) ~= 0) then return; end
+        local cur = out_s[0];
+        local hit = (cur ~= nil and cur == bb);
+        if (cur ~= nil) then cur.lpVtbl.Release(cur); end
+        if (not hit) then return; end
+    else
+        if (vt.GetViewport(dev, vp) ~= 0) then return; end
+        if (vp.Width == world_w and vp.Height == world_h) then return; end   -- Still the world.
+    end
+    fire(dev);
 end
 
 -- Hold target and camera.
@@ -113,6 +126,7 @@ function late.arm(dev)
         drop_refs(); effects.discard(); signs.discard(); return;
     end
     world_w, world_h = vp.Width, vp.Height;
+    if (vt.GetBackBuffer(dev, 0, 0, out_s) == 0 and out_s[0] ~= nil) then bb = out_s[0]; end
     if (not registered) then
         ashita.events.register('d3d_dpup', 'zonelines_late', on_dpup);
         registered = true;
