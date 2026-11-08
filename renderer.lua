@@ -1048,9 +1048,13 @@ local function draw_text_pass(device, view, text_scale)
 
     local fixed = (renderer.d3d_labels_fixed == true);
     FIX.on = false;
+    local eye_x, eye_z, hand = 0, 0, 1;
     if (fixed) then   -- World vertices.
         device:SetTransform(2, view);
         device:SetTransform(3, cached_proj);
+        eye_x = -(view._41 * view._11 + view._42 * view._12 + view._43 * view._13);   -- Camera position.
+        eye_z = -(view._41 * view._31 + view._42 * view._32 + view._43 * view._33);
+        hand = effects.handed();
     end
     local ref_dist = 30.0;  -- Base scale distance.
     local min_s = renderer.d3d_text_min_scale;
@@ -1072,8 +1076,9 @@ local function draw_text_pass(device, view, text_scale)
                 dist_factor = math.max(min_s, math.min(max_s, dist_factor));
                 if (fixed) then   -- World size layout.
                     local fx, fz = lbl.fx or 1, lbl.fz or 0;
-                    local ex, _, eok = project_with_z(view, cached_proj, vp_w, vp_h, lbl.x + fx, lbl.y, lbl.z + fz);
-                    if (eok and ex < sx) then fx, fz = -fx, -fz; end   -- Reads left to right.
+                    -- Reads left to right: flip by the camera's side of the label plane. Screen-space
+                    -- order of two points on the label inverts near edge-on and up close.
+                    if (hand * ((eye_x - lbl.x) * fz - (eye_z - lbl.z) * fx) < 0) then fx, fz = -fx, -fz; end
                     FIX.on, FIX.ax, FIX.ay, FIX.az, FIX.rx, FIX.rz = true, lbl.x, lbl.y, lbl.z, fx, fz;
                     sx, sy, dist_factor = 0, 0, 1;
                 end
