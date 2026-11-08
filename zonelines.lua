@@ -67,6 +67,10 @@ local default_settings = T{
     d3d_font_family      = 'Arial',    -- Label font family.
     d3d_outline_width    = 2,          -- label outline thickness
     d3d_bold             = true,       -- bold labels
+    d3d_text_color       = T{ 1.0, 1.0, 1.0 },  -- label text color
+    d3d_gradient_style   = 0,          -- gdifonts Gradient enum (0 = none)
+    d3d_gradient_color   = T{ 1.0, 1.0, 1.0 },  -- gradient end color
+    d3d_outline_color    = T{ 0.0, 0.0, 0.0 },  -- label outline color
     d3d_show_labels      = true,
     d3d_show_distance    = true,
     d3d_dist_position    = 'bottom',  -- 'bottom', 'top', 'left', 'right'

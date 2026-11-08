@@ -38,6 +38,7 @@ local B = {
     hover_height = { 0 }, rise_distance = { 0 }, d3d_text_scale = { 0 }, d3d_label_offset = { 0 },
     d3d_text_min_scale = { 0 }, d3d_text_max_scale = { 0 }, d3d_labels_fixed = { false }, d3d_show_labels = { true }, d3d_show_distance = { true },
     d3d_dist_pos_idx = { 0 }, d3d_font_idx = { 0 }, d3d_outline_width = { 0 }, d3d_bold = { true }, d3d_label_spacing = { 0 },
+    d3d_text_color = { 1, 1, 1 }, d3d_gradient_idx = { 0 }, d3d_gradient_color = { 1, 1, 1 }, d3d_outline_color = { 0, 0, 0 },
     dot_glow_enabled = { true }, dot_glow_speed = { 0 }, dot_glow_intensity = { 0 }, dot_glow_min = { 0 }, dot_glow_max = { 0 },
     distance_fade = { false }, distance_fade_zone = { 0 }, dot_color = { 0, 0, 0 }, use_dist_colors = { false },
     color_far = { 0, 0, 0 }, color_mid = { 0, 0, 0 }, color_close = { 0, 0, 0 }, show_zone_lines = { true }, show_travel = { true }, show_crests = { true }, show_teleporters = { true }, show_map_exits = { true }, map_times = { true }, map_zone_lines = { true }, map_portals = { true }, map_docks = { true },
@@ -108,6 +109,10 @@ end
 
 local DIST_POS_NAMES = 'Bottom\0Top\0Left\0Right\0';
 local DIST_POS_VALUES = { 'bottom', 'top', 'left', 'right' };
+
+-- Combo index == gdifonts Gradient enum value.
+local GRADIENT_NAMES = 'None\0Left to right\0Top-left to bottom-right\0Top to bottom\0Top-right to bottom-left\0'
+    .. 'Right to left\0Bottom-right to top-left\0Bottom to top\0Bottom-left to top-right\0';
 
 local function font_values()
     local l = renderer.font_list;
@@ -264,12 +269,12 @@ end
 
 local LABELS = { 'Schedule NPCs', 'Dot colour', 'Dot size', 'Text colour', 'Names', 'Colour', 'Colour by distance', 'Size', 'Spacing',
     'Height above ground', 'Slope smoothing', 'Soft edges', 'Pulse', 'Show within', 'Fade at the edge',
-'Destination name', 'Nation crest', 'Distance', 'Font', 'Font files', 'Bold',
+'Destination name', 'Nation crest', 'Distance', 'Font', 'Font files', 'Bold', 'Gradient',
     'Outline', 'Height above the line', 'Smallest, far away', 'Largest, up close', 'Dot line', 'Travelling wave',
     'Draw-in reveal', 'Rising motes', 'Signs at the docks', 'Times over schedule NPCs', 'Hide',
     'What', 'NPC', 'Routes', 'Goes to', 'Position', 'Pole height', 'Reset line' };
 for _, t in ipairs(SIGN_TUNE) do LABELS[#LABELS + 1] = t[2] .. '    '; end   -- indented rows
-for _, l in ipairs({ 'Far, 20+ yalms', 'Mid, 10-20 yalms', 'Close, under 10', 'Speed', 'Dimmest', 'Brightest',
+for _, l in ipairs({ 'Gradient colour', 'Outline colour', 'Far, 20+ yalms', 'Mid, 10-20 yalms', 'Close, under 10', 'Speed', 'Dimmest', 'Brightest',
     'Strength', 'Fade length', 'Gap', 'Duration', 'Amount', 'Range', 'Rise', 'Start height' }) do LABELS[#LABELS + 1] = l .. '    '; end
 
 local function measure()
@@ -320,6 +325,10 @@ local function sync_from_settings()
     B.d3d_font_idx[1] = fidx;
     B.d3d_outline_width[1]  = s.d3d_outline_width or d.d3d_outline_width;
     B.d3d_bold[1]           = (s.d3d_bold ~= false);
+    set3(B.d3d_text_color, s.d3d_text_color or d.d3d_text_color, d.d3d_text_color);
+    B.d3d_gradient_idx[1]   = s.d3d_gradient_style or d.d3d_gradient_style;
+    set3(B.d3d_gradient_color, s.d3d_gradient_color or d.d3d_gradient_color, d.d3d_gradient_color);
+    set3(B.d3d_outline_color, s.d3d_outline_color or d.d3d_outline_color, d.d3d_outline_color);
     local dp = s.d3d_dist_position or d.d3d_dist_position;
     for i = 1, #DIST_POS_VALUES do
         if (DIST_POS_VALUES[i] == dp) then B.d3d_dist_pos_idx[1] = i - 1; break; end
@@ -388,6 +397,10 @@ local function sync_to_settings()
     s.d3d_font_family    = font_values()[B.d3d_font_idx[1] + 1] or 'Arial';
     s.d3d_outline_width  = B.d3d_outline_width[1];
     s.d3d_bold           = B.d3d_bold[1];
+    s.d3d_text_color     = T{ B.d3d_text_color[1], B.d3d_text_color[2], B.d3d_text_color[3] };
+    s.d3d_gradient_style = B.d3d_gradient_idx[1];
+    s.d3d_gradient_color = T{ B.d3d_gradient_color[1], B.d3d_gradient_color[2], B.d3d_gradient_color[3] };
+    s.d3d_outline_color  = T{ B.d3d_outline_color[1], B.d3d_outline_color[2], B.d3d_outline_color[3] };
     s.d3d_label_spacing  = B.d3d_label_spacing[1];
     s.dot_glow_enabled   = B.dot_glow_enabled[1];
     s.dot_glow_speed     = B.dot_glow_speed[1];
@@ -601,7 +614,8 @@ end
 
 local LABEL_KEYS = { 'd3d_show_labels', 'show_crests', 'd3d_show_distance', 'd3d_dist_position', 'd3d_label_spacing',
     'd3d_font_family', 'd3d_bold', 'd3d_outline_width', 'd3d_text_scale', 'd3d_label_offset', 'd3d_text_min_scale',
-    'd3d_text_max_scale', 'd3d_labels_fixed' };
+    'd3d_text_max_scale', 'd3d_labels_fixed', 'd3d_text_color', 'd3d_gradient_style', 'd3d_gradient_color',
+    'd3d_outline_color' };
 
 local function body_lshow()
     if (not rows_begin('##lshow')) then return; end
@@ -631,8 +645,20 @@ local function body_ltext()
     end
     row('Bold', 'Bold label text.');
     check('##bold', B.d3d_bold);
-    row('Outline', 'Black outline around the letters.');
+    row('Text colour', 'Colour of the label text. With a gradient, the colour it starts from.');
+    color('##text_color', B.d3d_text_color);
+    row('Gradient', 'Fades the text from its colour to the gradient colour.');
+    combo('##gradient', B.d3d_gradient_idx, GRADIENT_NAMES);
+    imgui.BeginDisabled(B.d3d_gradient_idx[1] == 0);
+    subrow('Gradient colour', 'Colour the text fades to.');
+    color('##gradient_color', B.d3d_gradient_color);
+    imgui.EndDisabled();
+    row('Outline', 'Outline around the letters.');
     slider('##outline', B.d3d_outline_width, 0, 5, '%.0f px');
+    imgui.BeginDisabled(B.d3d_outline_width[1] < 0.5);
+    subrow('Outline colour', 'Colour of the outline.');
+    color('##outline_color', B.d3d_outline_color);
+    imgui.EndDisabled();
     row('Size', 'Size of the label text.');
     slider('##font_size', B.d3d_text_scale, 0.3, 3.0, '%.1fx');
     imgui.EndTable();
