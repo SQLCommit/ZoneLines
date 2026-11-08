@@ -42,7 +42,7 @@ The main file should be at `/ashita/addons/zonelines/zonelines.lua`.
 | **Portals** | Windurst teleporters, Outpost Warp and Aht Urhgan warp NPCs, and Delkfutt's Tower telepads, with destinations and floors. |
 | **Ship times** | Signboards at every airship, ferry, barge, and manaclipper dock and in the Port Jeuno arches, plus times above the schedule NPCs. |
 | **Native map** | Exits, portals, docks, and ship times on the game's `/map`, for the floor you are viewing. |
-| **Destination labels** | Zone names, distance, and the destination's conquest crest, with adjustable fonts, outlines, and placement. |
+| **Destination labels** | Zone names, distance, and the destination's conquest crest, with adjustable fonts, text and outline colours, gradients, and placement. |
 | **Effects** | Pulse, travelling wave, draw-in reveal, and rising motes, each with its own controls. |
 | **Individual adjustments** | Hide or adjust any zone line, portal, sign, or schedule NPC in this zone. |
 

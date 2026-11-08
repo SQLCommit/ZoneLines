@@ -121,10 +121,15 @@ local SYNC_FIELDS = {   -- Field, setting key, flag.
     { 'dot_glow_speed', 'dot_glow_speed' }, { 'dot_glow_intensity', 'dot_glow_intensity' },
     { 'dot_glow_min', 'dot_glow_min' }, { 'dot_glow_max', 'dot_glow_max' },
     { 'd3d_labels_fixed', 'd3d_labels_fixed' },
+    { 'gdi_text_color', 'd3d_text_color' }, { 'gdi_gradient_style', 'd3d_gradient_style' },
+    { 'gdi_gradient_color', 'd3d_gradient_color' }, { 'gdi_outline_color', 'd3d_outline_color' },
 };
 for _, f in ipairs(SYNC_FIELDS) do renderer[f[1]] = f[3] and false or 0; end
 renderer.d3d_dist_position = 'bottom';
 renderer.gdi_font_family = 'Arial';
+renderer.gdi_text_color = { 1.0, 1.0, 1.0 };
+renderer.gdi_gradient_color = { 1.0, 1.0, 1.0 };
+renderer.gdi_outline_color = { 0.0, 0.0, 0.0 };
 
 -- Label and glow settings.
 function renderer.sync(s, d)
@@ -852,34 +857,62 @@ local gdi_free, gdi_free_n = {}, 0;   -- Idle label objects.
 local GDI_FREE_MAX = 6;
 local gdi_frame = 0;
 local cache_family, cache_bold, cache_outline = nil, nil, nil;
+local cache_color, cache_grad, cache_grad_color, cache_outline_color = nil, nil, nil, nil;
 
-local function gdi_get(text, perm)
+-- Label colours as ARGB. Opaque only: the text pass alpha-tests at 0x80, so translucent colours get cut.
+local WHITE, BLACK = { 1, 1, 1 }, { 0, 0, 0 };
+local function label_style()
+    local gs = renderer.gdi_gradient_style or 0;
+    local gc = (gs ~= 0) and rgb_to_argb(renderer.gdi_gradient_color or WHITE, 0xFF) or 0;
+    return rgb_to_argb(renderer.gdi_text_color or WHITE, 0xFF), gs, gc, rgb_to_argb(renderer.gdi_outline_color or BLACK, 0xFF);
+end
+
+-- Plain = white text, black outline: signs tint their text by vertex colour.
+local function style_of(plain)
+    if (plain) then return 0xFFFFFFFF, 0, 0, 0xFF000000; end
+    return label_style();
+end
+
+local function apply_style(obj, plain)
+    local fc, gs, gc, oc = style_of(plain);
+    obj:set_font_color(fc);
+    obj:set_gradient_style(gs);
+    obj:set_gradient_color(gc);
+    obj:set_outline_color(oc);
+end
+
+local function gdi_get(text, perm, plain)
     if (gdi == nil or text == nil or text == '') then return nil, nil; end
     local store = (perm == 'zone') and gdi_zone or perm and gdi_perm or gdi_cache;
-    local e = store[text];
+    local key = plain and ('\0' .. text) or text;
+    local e = store[key];
     if (e == nil and not perm and gdi_free_n > 0) then
         e = gdi_free[gdi_free_n];
         gdi_free[gdi_free_n] = nil;
         gdi_free_n = gdi_free_n - 1;
         e.obj:set_text(text);
-        store[text] = e;
+        apply_style(e.obj, plain);
+        store[key] = e;
     end
     if (e == nil) then
+        local fc, gs, gc, oc = style_of(plain);
         local ok, obj = pcall(gdi.create_object, gdi, {
-            font_family   = renderer.gdi_font_family or 'Arial',
-            font_height   = GDI_FONT_HEIGHT,
-            font_flags    = (renderer.gdi_bold ~= false) and 1 or 0,
-            font_color    = 0xFFFFFFFF,
-            outline_color = 0xFF000000,
-            outline_width = renderer.gdi_outline_width or 2,
-            text          = text,
+            font_family    = renderer.gdi_font_family or 'Arial',
+            font_height    = GDI_FONT_HEIGHT,
+            font_flags     = (renderer.gdi_bold ~= false) and 1 or 0,
+            font_color     = fc,
+            gradient_style = gs,
+            gradient_color = gc,
+            outline_color  = oc,
+            outline_width  = renderer.gdi_outline_width or 2,
+            text           = text,
         }, true);
         if (not ok or obj == nil) then
             gdi_warn('Label text could not be created for font "' .. tostring(renderer.gdi_font_family) .. '". Try another font.');
             return nil, nil;
         end
         e = { obj = obj };
-        store[text] = e;
+        store[key] = e;
     end
     e.frame = gdi_frame;
     local ok, tex, rect = pcall(e.obj.get_texture, e.obj);
@@ -989,10 +1022,13 @@ end
 
 -- Rebuild cached labels.
 local function gdi_font_check()
+    local fc, gs, gc, oc = label_style();
     if (renderer.gdi_font_family ~= cache_family or renderer.gdi_bold ~= cache_bold
-        or renderer.gdi_outline_width ~= cache_outline) then
+        or renderer.gdi_outline_width ~= cache_outline or fc ~= cache_color or gs ~= cache_grad
+        or gc ~= cache_grad_color or oc ~= cache_outline_color) then
         renderer.cleanup_gdi();
         cache_family, cache_bold, cache_outline = renderer.gdi_font_family, renderer.gdi_bold, renderer.gdi_outline_width;
+        cache_color, cache_grad, cache_grad_color, cache_outline_color = fc, gs, gc, oc;
     end
 end
 
@@ -1000,7 +1036,7 @@ end
 signs.text_source = function(text)
     if (gdi == nil and ensure_gdi() == nil) then return nil, nil; end
     gdi_font_check();
-    return gdi_get(text);
+    return gdi_get(text, nil, true);
 end
 
 local function draw_text_pass(device, view, text_scale)
