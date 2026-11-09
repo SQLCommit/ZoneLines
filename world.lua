@@ -185,6 +185,14 @@ P.SIGNS = {
         { spot = 'arch', runs = { 'jeuno_kazham_airship' }, at = { 7.1, 0, 11.36 }, face = { 0, -1 }, emblem = 'kaz' },
         { spot = 'arch', runs = { 'jeuno_bastok_airship' }, at = { -81.1, 0, -12.25 }, face = { 0, 1 }, emblem = 'basu' },
         { spot = 'arch', runs = { 'jeuno_windurst_airship' }, at = { 7.1, 0, -12.25 }, face = { 0, 1 }, emblem = 'win' },
+        { spot = 'dock', runs = { 'jeuno_bastok_airship' }, at = { -52.92, 12.0, -117.04 }, face = { 1.0, -0.022 }, emblem = 'basu', slim = true,
+            width = 6.55, up = 3.85 },   -- Spans the berth poles.
+        { spot = 'dock', runs = { 'jeuno_windurst_airship' }, at = { 11.10, 12.0, -117.02 }, face = { 1.0, -0.022 }, emblem = 'win', slim = true,
+            width = 6.55, up = 3.85 },
+        { spot = 'dock', runs = { 'jeuno_sandoria_airship' }, at = { -85.23, 12.0, 117.02 }, face = { -1.0, 0.022 }, emblem = 'san', slim = true,
+            width = 6.55, up = 3.85 },
+        { spot = 'dock', runs = { 'jeuno_kazham_airship' }, at = { -21.22, 12.0, 117.02 }, face = { -1.0, 0.022 }, emblem = 'kaz', slim = true,
+            width = 6.55, up = 3.85 },
     },
     -- Airship cities.
     [236] = { { spot = 'dock', runs = { 'bastok_jeuno_airship' }, at = { -36.43, 7.71, -60.39 }, face = { 0, 1 }, emblem = 'jeuno' },
