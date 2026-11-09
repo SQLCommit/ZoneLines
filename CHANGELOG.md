@@ -2,6 +2,12 @@
 
 [Back to ZoneLines](README.md)
 
+## v1.4.2
+
+### Fixed
+
+- The world turned grey with Rising motes on, or near warp NPCs, when a d3d8 proxy DLL was installed.
+
 ## v1.4.1
 
 ### Fixed

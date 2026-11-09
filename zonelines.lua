@@ -2,7 +2,7 @@
 
 addon.name    = 'zonelines';
 addon.author  = 'SQLCommit';
-addon.version = '1.4.1';
+addon.version = '1.4.2';
 addon.desc    = 'Visualizes zone line boundaries with ground markers.';
 addon.link    = 'https://github.com/SQLCommit/zonelines';
 

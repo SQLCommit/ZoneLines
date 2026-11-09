@@ -18,7 +18,6 @@ for i = 1, #TSS1 do t1_v[i] = 0; end
 
 local out_dw  = ffi.new('DWORD[1]');
 local out_s   = ffi.new('IDirect3DSurface8*[1]');
-local out_tex = ffi.new('IDirect3DBaseTexture8*[1]');
 local vp, save_vp = ffi.new('D3DVIEWPORT8'), ffi.new('D3DVIEWPORT8');
 local view, proj = ffi.new('D3DMATRIX'), ffi.new('D3DMATRIX');
 local s_world, s_view, s_proj = ffi.new('D3DMATRIX'), ffi.new('D3DMATRIX'), ffi.new('D3DMATRIX');
@@ -36,6 +35,12 @@ local function drop_refs()
 end
 
 local function draw(dev, vt)
+    local sb = textures.hold(dev);
+    if (sb == nil) then   -- Never unbind the copy.
+        effects.discard(); signs.discard();
+        if (not warned) then warned = true; textures.log('late draw: no state block'); end
+        return;
+    end
     local cur_rt, cur_ds = nil, nil;
     if (vt.GetRenderTarget(dev, out_s) == 0) then cur_rt = out_s[0]; end
     if (vt.GetDepthStencilSurface(dev, out_s) == 0) then cur_ds = out_s[0]; end
@@ -48,7 +53,6 @@ local function draw(dev, vt)
     for i = 1, #TSS1 do t1_v[i] = (vt.GetTextureStageState(dev, 1, TSS1[i], out_dw) == 0) and out_dw[0] or -1; end
     local fvf = (vt.GetVertexShader(dev, out_dw) == 0) and out_dw[0] or nil;
     local ps  = (vt.GetPixelShader(dev, out_dw) == 0) and out_dw[0] or nil;
-    local tex = (vt.GetTexture(dev, 0, out_tex) == 0) and out_tex[0] or nil;
 
     local ok, err = true, nil;
     if (vt.SetRenderTarget(dev, rt, ds) == 0) then
@@ -81,8 +85,7 @@ local function draw(dev, vt)
     for i = 1, #TSS1 do if (t1_v[i] ~= -1) then vt.SetTextureStageState(dev, 1, TSS1[i], t1_v[i]); end end
     if (fvf ~= nil) then vt.SetVertexShader(dev, fvf); end
     if (ps ~= nil) then vt.SetPixelShader(dev, ps); end
-    vt.SetTexture(dev, 0, tex);
-    if (tex ~= nil) then tex.lpVtbl.Release(tex); end
+    textures.restore(dev, sb);
     if (cur_rt ~= nil) then cur_rt.lpVtbl.Release(cur_rt); end
     if (cur_ds ~= nil) then cur_ds.lpVtbl.Release(cur_ds); end
     if (not ok and not warned) then warned = true; textures.log('late draw: ' .. tostring(err)); end

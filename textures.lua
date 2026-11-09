@@ -36,6 +36,23 @@ function textures.log(line)
     end);
 end
 
+-- Stage-0 texture held by D3D.
+local sb_tok = ffi.new('DWORD[1]');
+function textures.hold(dev)
+    local vt = dev.lpVtbl;
+    if (vt.BeginStateBlock(dev) ~= 0) then return nil; end
+    vt.SetTexture(dev, 0, nil);   -- Recorded, not applied.
+    if (vt.EndStateBlock(dev, sb_tok) ~= 0) then return nil; end
+    local sb = sb_tok[0];
+    if (vt.CaptureStateBlock(dev, sb) ~= 0) then vt.DeleteStateBlock(dev, sb); return nil; end
+    return sb;
+end
+
+function textures.restore(dev, sb)
+    dev.lpVtbl.ApplyStateBlock(dev, sb);
+    dev.lpVtbl.DeleteStateBlock(dev, sb);
+end
+
 local function log_once(name, why)
     failed[name] = true;
     textures.log('texture ' .. name .. ': ' .. why);

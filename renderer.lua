@@ -27,6 +27,7 @@ ffi.cdef[[
 ]];
 
 local effects = require 'effects';
+local textures = require 'textures';
 local signs   = require 'signs';
 local transport = require 'transport';
 
@@ -1413,7 +1414,9 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
     local save_afunc    = get_rs(device, D3DRS_ALPHAFUNC);
     local save_fog      = get_rs(device, D3DRS_FOGENABLE);  -- Zone fog.
     local save_fvf = (vt.GetVertexShader(device, out_dw) == 0) and out_dw[0] or nil;
-    local save_tex = (vt.GetTexture(device, 0, out_tex) == 0) and out_tex[0] or nil;
+    local save_sb = textures.hold(device);
+    local save_tex = nil;
+    if (save_sb == nil and vt.GetTexture(device, 0, out_tex) == 0) then save_tex = out_tex[0]; end
     local save_ps  = (vt.GetPixelShader(device, out_dw) == 0) and out_dw[0] or nil;
     -- Own transform buffers.
     local have_world = (vt.GetTransform(device, D3DTS_WORLD, restore_world) == 0);
@@ -1460,9 +1463,11 @@ function renderer.draw_d3d(zone_lines, player_x, player_y, player_z, s)
     if (have_world) then device:SetTransform(D3DTS_WORLD, restore_world); end
     if (have_view) then device:SetTransform(2, restore_view); end
     if (have_proj) then device:SetTransform(3, restore_proj); end
-    device:SetTexture(0, save_tex);
-    -- Release the texture ref.
-    if (save_tex ~= nil) then save_tex:Release(); end
+    if (save_sb ~= nil) then textures.restore(device, save_sb);
+    else
+        device:SetTexture(0, save_tex);
+        if (save_tex ~= nil) then save_tex:Release(); end   -- Release the texture ref.
+    end
     device:SetRenderState(D3DRS_LIGHTING, save_light);
     device:SetRenderState(D3DRS_FOGENABLE, save_fog);
     device:SetRenderState(D3DRS_ZENABLE, save_zenable);
