@@ -264,7 +264,7 @@ local function rows(zl, sec)
                 zl.s_emb = zl.emblems and zl.emblems[run.name] or zl.emblem;
             end
             local st, cd = status(b), (C.mask >= 4) and b.cd or nil;
-            if (#g > 1 and cd ~= nil) then st, cd = st and (st .. '  ' .. cd) or cd, nil; end
+            if ((#g > 1 or zl.slim) and cd ~= nil) then st, cd = st and (st .. '  ' .. cd) or cd, nil; end
             zl.s_line[i], zl.s_cd[i], zl.s_open[i] = st or false, cd or false, b.open;
         end
     end
@@ -279,7 +279,7 @@ local function rows(zl, sec)
             if (#g > 1) then
                 n = n + 1; ROW_S[n], ROW_H[n], ROW_C[n] = grp.label, NAME_H, C.title_c;
             else
-                if (zl.s_cap ~= '') then n = n + 1; ROW_S[n], ROW_H[n], ROW_C[n] = zl.s_cap, CAP_H, C.title_c; end
+                if (zl.s_cap ~= '' and not zl.slim) then n = n + 1; ROW_S[n], ROW_H[n], ROW_C[n] = zl.s_cap, CAP_H, C.title_c; end
                 n = n + 1; ROW_S[n], ROW_H[n], ROW_C[n] = zl.s_dest, TITLE_H, C.title_c;
             end
         end
@@ -303,11 +303,11 @@ function signs.queue(zl, sec, fade, view, lift)
     for j = 1, n do text_h = text_h + ROW_H[j] * kt; end
     local h = text_h + 2 * pad;
     if (skin) then h = max(h, 2 * skin.corner * TEXEL * sc + 0.1 * sc); end
-    local w = C.w * sc;
+    local w = zl.width or C.w * sc;   -- Fixed width ignores scale.
     local hand = effects.handed();
     local nx, nz = zl.nx, zl.nz;
     local rx, rz = -hand * nz, hand * nx;   -- Reader's right.
-    local x, z, cy = zl.x, zl.z, zl.y - C.up - (lift or 0);
+    local x, z, cy = zl.x, zl.z, zl.y - (zl.up or C.up) - (lift or 0);
     if (zl.slot ~= nil) then   -- One of a door pair.
         local o = zl.slot * (w / 2 + 0.15 * sc);
         x, z = x + rx * o, z + rz * o;
@@ -348,13 +348,24 @@ function signs.queue(zl, sec, fade, view, lift)
     if (signs.band_state == 0) then measure_band(get); end
     local v0, v1 = signs.band0, signs.band1;
     local y = cy - text_h / 2;
+    local refs = zl.s_ref;
+    if (refs == nil) then refs = {}; zl.s_ref = refs; end
     for j = 1, n do
         local th = ROW_H[j] * kt;
-        local tex, rect = get(ROW_S[j]);
+        local str = ROW_S[j];
+        local tex, rect = get(str);
         if (tex ~= nil and rect ~= nil and rect.right > 0 and rect.bottom > 0) then
             local tw = th * rect.right / (rect.bottom * (v1 - v0));   -- Ink band fills row.
-            local k = (tw > area) and area / tw or 1;   -- Each row fits.
-            if (not pic(tex, tw * k, th * k, x, y + th / 2, z, nx, nz, rx, rz, off, fade_col(ROW_C[j], fade), v0, v1)) then break; end
+            local rw = tw;   -- Width with digits as 0, so ticking digits keep the row still.
+            local ref = refs[j];
+            if (ref == nil or ref.s ~= str) then ref = { s = str, t = (str:gsub('%d', '0')) }; refs[j] = ref; end
+            if (ref.t ~= str) then
+                local _, rr = get(ref.t);
+                if (rr ~= nil and rr.right > 0 and rr.bottom > 0) then rw = th * rr.right / (rr.bottom * (v1 - v0)); end
+            end
+            local k = (rw > area) and area / rw or 1;   -- Each row fits.
+            local o = off + (tw - rw) * k / 2;   -- Left edge pinned to the box.
+            if (not pic(tex, tw * k, th * k, x, y + th / 2, z, nx, nz, rx, rz, o, fade_col(ROW_C[j], fade), v0, v1)) then break; end
         end
         y = y + th + gap;
     end

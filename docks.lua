@@ -89,7 +89,7 @@ function docks.signs(zone_id)
                 x = d.at[1], y = d.at[2], z = d.at[3], nx = d.face[1], nz = d.face[2],
                 rect_id = 970000 + zone_id * 10 + k, ident = 'sign', sign = true,
                 display_name = routes[1].label, routes = routes, emblem = d.emblem, slot = d.slot,
-                swap = d.swap, emblems = d.emblems, spot = d.spot,
+                swap = d.swap, emblems = d.emblems, spot = d.spot, slim = d.slim, up = d.up, width = d.width,
             };
         end
     end
